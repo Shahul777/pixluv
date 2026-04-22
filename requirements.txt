@@ -1,0 +1,4 @@
+Pillow>=10.0.0
+reportlab>=4.0
+pillow-heif>=0.16
+Flask>=3.0
