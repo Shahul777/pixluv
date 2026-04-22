@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basa - Print PDF Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+        }
+        .header {
+            background: #1a1a2e;
+            color: #fff;
+            text-align: center;
+            padding: 18px 16px;
+        }
+        .header h1 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+        .header p {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 4px;
+        }
+        .container {
+            max-width: 520px;
+            margin: 24px auto;
+            padding: 0 16px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            margin-bottom: 16px;
+        }
+        .step-label {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 6px;
+        }
+        select, input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            background: #fafafa;
+            transition: border-color 0.2s;
+            -webkit-appearance: none;
+        }
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #1a1a2e;
+        }
+        .info-text {
+            font-size: 13px;
+            color: #666;
+            margin-top: 6px;
+            font-style: italic;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 32px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafafa;
+            position: relative;
+        }
+        .upload-area:hover, .upload-area.dragover {
+                       border-color: #1a1a2e;
+            background: #f0f0ff;
+        }
+        .upload-area input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .upload-icon {
+            font-size: 40px;
+            margin-bottom: 8px;
+        }
+        .upload-text {
+            font-size: 14px;
+            color: #555;
+        }
+        .upload-text strong {
+            color: #1a1a2e;
+        }
+        .file-count {
+            margin-top: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+        .file-count.error {
+            color: #d32f2f;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background: #1a1a2e;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #2a2a4e; }
+        .btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+        .progress-wrap {
+            display: none;
+            margin-top: 16px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #1a1a2e;
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 3px;
+        }
+        .status-text {
+            font-size: 13px;
+            color: #666;
+            text-align: center;
+            margin-top: 8px;
+        }
+        .error-msg {
+            background: #ffeaea;
+            color: #d32f2f;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-top: 12px;
+            display: none;
+        }
+        .success-msg {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-top: 12px;
+                        display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BASA &bull; Pre-Print Workflow</h1>
+        <p>Upload photos &rarr; Get print-ready CMYK PDF</p>
+    </div>
+
+    <div class="container">
+        <form id="pdfForm" enctype="multipart/form-data">
+
+            <div class="card">
+                <div class="step-label">Step 1 &mdash; Choose Layout</div>
+                <label for="layout">Layout</label>
+                <select id="layout" name="layout">
+                    {% for key, val in layouts.items() %}
+                    <option value="{{ key }}" data-max="{{ val.max_images }}">{{ val.label }}</option>
+                    {% endfor %}
+                </select>
+                <div class="info-text" id="maxInfo">Max 18 photos for this layout</div>
+            </div>
+
+            <div class="card">
+                <div class="step-label">Step 2 &mdash; Order Name</div>
+                <label for="orderName">Order / Folder Name</label>
+                <input type="text" id="orderName" name="order_name" placeholder="e.g. ORD-20260422">
+            </div>
+
+            <div class="card">
+                <div class="step-label">Step 3 &mdash; Upload Photos</div>
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" name="images" id="imageInput" multiple
+                        accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.heic,.heif">
+                    <div class="upload-icon">📷</div>
+                    <div class="upload-text">
+                        <strong>Tap to select photos</strong><br>
+                        or drag &amp; drop here
+                    </div>
+                </div>
+                <div class="file-count" id="fileCount"></div>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">Generate CMYK Print PDF</button>
+
+            <div class="progress-wrap" id="progressWrap">
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="status-text" id="statusText">Processing...</div>
+            </div>
+
+            <div class="error-msg" id="errorMsg"></div>
+            <div class="success-msg" id="successMsg"></div>
+        </form>
+    </div>
+
+    <script>
+        const layoutSelect = document.getElementById('layout');
+        const maxInfo = document.getElementById('maxInfo');
+        const imageInput = document.getElementById('imageInput');
+        const fileCount = document.getElementById('fileCount');
+        const uploadArea = document.getElementById('uploadArea');
+        const form = document.getElementById('pdfForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const progressWrap = document.getElementById('progressWrap');
+        const progressFill = document.getElementById('progressFill');
+        const statusText = document.getElementById('statusText');
+        const errorMsg = document.getElementById('errorMsg');
+        const successMsg = document.getElementById('successMsg');
+
+        function getMaxImages() {
+            return parseInt(layoutSelect.selectedOptions[0].dataset.max);
+        }
+
+        layoutSelect.addEventListener('change', () => {
+            maxInfo.textContent = `Max ${getMaxImages()} photos for this layout`;
+            validateFileCount();
+        });
+
+        imageInput.addEventListener('change', validateFileCount);
+
+        function validateFileCount() {
+            const max = getMaxImages();
+            const count = imageInput.files.length;
+            if (count === 0) {
+                fileCount.textContent = '';
+                fileCount.className = 'file-count';
+                return;
+            }
+            if (count > max) {
+                fileCount.textContent = `${count} files selected &mdash; exceeds max ${max}!`;
+                fileCount.className = 'file-count error';
+            } else {
+                fileCount.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
+                fileCount.className = 'file-count';
+            }
+        }
+
+        ['dragover', 'dragenter'].forEach(e => {
+            uploadArea.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(e => {
+            uploadArea.addEventListener(e, () => uploadArea.classList.remove('dragover'));
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+
+            const max = getMaxImages();
+            const count = imageInput.files.length;
+
+            if (count === 0) {
+                showError('Please select at least one photo.');
+                return;
+            }
+            if (count > max) {
+                showError(`Too many photos! This layout supports max ${max}, you selected ${count}.`);
+                return;
+            }
+
+            submitBtn.disabled = true;
+            progressWrap.style.display = 'block';
+            progressFill.style.width = '0%';
+            statusText.textContent = 'Uploading & processing...';
+
+            const formData = new FormData(form);
+
+            try {
+                progressFill.style.width = '30%';
+                statusText.textContent = 'Uploading photos...';
+
+                const resp = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                progressFill.style.width = '80%';
+                statusText.textContent = 'Generating PDF...';
+
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    throw new Error(data.error || 'Server error');
+                }
+
+                progressFill.style.width = '100%';
+                statusText.textContent = 'Done ✓';
+
+                const blob = await resp.blob();
+                const orderName = document.getElementById('orderName').value.trim() || 'Order';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${orderName}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                successMsg.textContent = 'PDF downloaded successfully!';
+                successMsg.style.display = 'block';
+
+            } catch (err) {
+                showError(err.message);
+                progressWrap.style.display = 'none';
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
+
+            
