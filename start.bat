@@ -42,5 +42,5 @@ if %errorlevel% neq 0 (
 :: Start the web app
 echo [3/3] Starting Basa Web App...
 echo.
-python web_app.py
+python app.py
 pause

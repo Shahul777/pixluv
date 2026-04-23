@@ -1,5 +1,5 @@
 """Basa - Web-based Pre-Printing Workflow"""
-
+import io
 import os
 import uuid
 import shutil
@@ -323,22 +323,23 @@ def generate():
 
         pdf_path = os.path.join(work_dir, f"{order_name}.pdf")
         generate_pdf(saved_paths, pdf_path, order_name, layout)
+        buf = io.BytesIO()
+        with open(pdf_path,"rb") as f:
+            buf.write(f.read())
+        buf.seek(0)
+        shutil.rmtree(work_dir, ignore_errors=True)
 
         return send_file(
-            pdf_path,
+            buf,
             mimetype="application/pdf",
             as_attachment=True,
             download_name=f"{order_name}.pdf",
         )
     except Exception as e:
         log.exception("PDF generation failed")
+        shutil.rmtree(work_dir,ignore_errors=True)
         return jsonify({"error": str(e)}), 500
-    finally:
-        try:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        except Exception:
-            pass
-
+    
 if __name__ == "__main__":
     import socket
     hostname = socket.gethostname()

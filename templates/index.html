@@ -318,9 +318,27 @@
                 statusText.textContent = 'Generating PDF...';
 
                 if (!resp.ok) {
-                    const data = await resp.json();
-                    throw new Error(data.error || 'Server error');
-                }
+let errText = 'Server error';
+		try{
+const data = await resp.json();
+errText = data.error || errText;
+                    
+}
+catch(_){
+const text = await resp.text().catch(() => '');
+if(resp.status === 413){
+errText ='upload toolarge';
+}
+else if(text){
+errText = text.substring(0,200);
+
+}
+else{
+errText = 'Server Error';
+}
+}
+throw new Error(errText);
+  }
 
                 progressFill.style.width = '100%';
                 statusText.textContent = 'Done ✓';
