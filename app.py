@@ -5,7 +5,7 @@ import os
 import re
 import time
 import queue
-import zipfile
+
 import threading
 from pathlib import Path
 from collections import OrderedDict
@@ -14,6 +14,7 @@ import fitz
 from flask import (
     Flask, render_template, request, Response, jsonify, send_file,
 )
+from db import get_setting, set_setting
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32)
@@ -121,10 +122,9 @@ def _run_module1(folder_path: str, task_id: str):
         for f in folder.iterdir():
             if not f.is_file():
                 continue
-            if f.suffix.lower() == ".zip" and _is_combined(f.stem):
+            if f.suffix.lower() == ".pdf" and _is_combined(f.stem):
                 f.unlink()
-            elif f.suffix.lower() == ".pdf" and _is_combined(f.stem):
-                f.unlink()
+            
 
         _emit(q, stage="cleanup", pct=5, detail="Old files cleaned up.")
 
@@ -226,17 +226,7 @@ def _run_module1(folder_path: str, task_id: str):
         _emit(q, stage="combine", pct=80,
               detail=f"Created {combined_name}")
 
-        _emit(q, stage="zip", pct=80,
-              detail="Creating ZIP of combined PDF...")
-
-        zip_name = f"{total}-combined-{non_4x3_count}.zip"
-        zip_path = folder / zip_name
-        with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_STORED) as zf:
-            zf.write(str(combined_path), combined_name)
-
-        _emit(q, stage="zip", pct=95, detail=f"Created {zip_name}")
-
-        _emit(q, stage="report", pct=95,
+        _emit(q, stage="report", pct=85,
               detail="Generating report.txt...")
         id_info: OrderedDict[str, dict] = OrderedDict()
         for item in sorted_list:
@@ -254,14 +244,31 @@ def _run_module1(folder_path: str, task_id: str):
             count_str = str(int(c)) if c == int(c) else f"{c:.1f}"
             report_lines.append(f"{oid}\t{info['variant']}\t{count_str}")
 
+            num_orders = len(id_info)
+            total_boards = total
+            boards_4x3 = sum(1 for item in sorted_list if item["variant"] == "4x3")
+            boards_3x2 = sum(1 for item in sorted_list if item["variant"] == "3x2")
+            boards_3x3 = sum(1 for item in sorted_list if item["variant"] == "3x3")
+
+            summary_header = (
+                    f"Orders: {num_orders}\n"
+                 f"Total Boards: {total_boards}\n"
+                    f"4x3 Boards: {boards_4x3}\n"
+                     f"3x2 Boards: {boards_3x2}\n"
+                        f"3x3 Boards: {boards_3x3}\n"
+                    f"{'=' * 40}\n"
+                        )
+            
+            
+
         report_path = folder / "report.txt"
         report_path.write_text(
-            "Order ID\tVariant\tCount\n" + "\n".join(report_lines) + "\n",
-            encoding="utf-8",
+         summary_header + "Order ID\tVariant\tCount\n" + "\n".join(report_lines),
+    encoding="utf-8",
         )
 
         _emit(q, stage="report", pct=98,
-              detail=f"report.txt written ({len(report_lines)} unique IDs)")
+             detail=f"report.txt written ({num_orders} orders, {total_boards} boards)")
 
         elapsed_total = round(time.perf_counter() - t0, 1)
         _emit(q, stage="done", pct=100, done=True,
@@ -269,9 +276,11 @@ def _run_module1(folder_path: str, task_id: str):
               result={
                   "sorted_list": sorted_list,
                   "combined_pdf": combined_name,
-                  "zip_file": zip_name,
-                  "total": total,
-                  "unique_ids": len(report_lines),
+                "unique_ids": num_orders,
+        "total_boards": total_boards,
+        "boards_4x3": boards_4x3,
+        "boards_3x2": boards_3x2,
+        "boards_3x3": boards_3x3,
                   "elapsed": elapsed_total,
               })
 
@@ -330,7 +339,40 @@ def module1_progress(task_id: str):
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no"})
 
+_M1_SETTING_BASE = "m1_base_folder"
+_OUTPUT_FOLDER_RE = re.compile(r"ship.*output", re.IGNORECASE)
 
+@app.route("/module1/base-folder", methods=["GET"])
+def m1_get_base_folder():
+    folder = get_setting(_M1_SETTING_BASE, "")
+    return jsonify({"folder": folder})
+
+@app.route("/module1/base-folder", methods=["POST"])
+def m1_set_base_folder():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+    if not folder:
+        return jsonify({"error": "Folder path is required."}), 400
+    p = Path(folder)
+    if not p.is_dir():
+        return jsonify({"error": f"Folder not found: {folder}"}), 400
+    
+    set_setting(_M1_SETTING_BASE, str(p))
+    return jsonify({"ok": True, "folder": str(p)})
+
+@app.route("/module1/output-folders", methods=["GET"])
+def m1_list_output_folders():
+    base = get_setting(_M1_SETTING_BASE, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+    
+    folders = []
+    for d in sorted(Path(base).iterdir(), key=lambda x: x.name.lower()):
+        if d.is_dir() and _OUTPUT_FOLDER_RE.search(d.name):
+            pdf_count = sum(1 for f in d.iterdir() if f.is_file() and f.suffix.lower() == ".pdf")
+            folders.append({"name": d.name, "path": str(d), "pdf_count": pdf_count})
+            
+    return jsonify({"folders": folders})
 A4_WIDTH = 595.28
 A4_HEIGHT = 841.89
 HALF_WIDTH = A4_WIDTH / 2
@@ -397,46 +439,75 @@ def shipping_labels():
         download_name="optimized_shipping_labels.pdf",
     )
 
+_M3_SETTING_BASE = "m3_base_folder"
 
+@app.route("/module3/base-folder", methods=["GET"])
+def m3_get_base_folder():
+    folder = get_setting(_M3_SETTING_BASE, "")
+    return jsonify({"folder": folder})
+
+@app.route("/module3/base-folder", methods=["POST"])
+def m3_set_base_folder():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+    if not folder:
+        return jsonify({"error": "Folder path is required."}), 400
+    p = Path(folder)
+    if not p.is_dir():
+        return jsonify({"error": f"Folder not found: {folder}"}), 400
+    set_setting(_M3_SETTING_BASE, str(p))
+    return jsonify({"ok": True, "folder": str(p)})
 @app.route("/module3/search", methods=["POST"])
 def module3_search():
     data = request.get_json(silent=True) or {}
-    folder_path = data.get("folder_path", "").strip()
     order_id = data.get("order_id", "").strip()
 
-    if not folder_path:
-        return jsonify({"error": "Folder path is required."}), 400
     if not re.fullmatch(r"\d{4}", order_id):
         return jsonify({"error": "Order ID must be exactly 4 digits."}), 400
 
-    folder = Path(os.path.normpath(folder_path))
-    if not folder.is_dir():
-        return jsonify({"error": f"Folder not found: {folder_path}"}), 400
+    base = get_setting(_M3_SETTING_BASE, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
 
+    base_path = Path(base)
     matches = []
-    for f in sorted(folder.iterdir(), key=lambda x: x.name.lower()):
-        if not f.is_file() or f.suffix.lower() != ".pdf":
+    match_folders = [] # track which folder each match came from
+
+    for d in sorted(base_path.iterdir(), key=lambda x: x.name.lower()):
+        if not d.is_dir() or not _OUTPUT_FOLDER_RE.search(d.name):
             continue
-        ids_in_name = FOUR_DIGIT_RE.findall(f.name)
-        if order_id in ids_in_name:
-            try:
-                doc = fitz.open(str(f))
-                page_count = len(doc)
-                doc.close()
-                matches.append({"filename": f.name, "page_count": page_count})
-            except Exception:
+            
+        for f in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+            if not f.is_file() or f.suffix.lower() != ".pdf":
                 continue
 
+            ids_in_name = FOUR_DIGIT_RE.findall(f.name)
+            if order_id in ids_in_name:
+                try:
+                    doc = fitz.open(str(f))
+                    page_count = len(doc)
+                    doc.close()
+                    matches.append({
+                        "filename": f.name,
+                        "page_count": page_count,
+                        "folder_name": d.name,
+                    })
+                    match_folders.append(str(d))
+                except Exception:
+                    continue
+
     if not matches:
-        return jsonify({"error": f"No PDFs found with order ID {order_id}."}), 404
+        return jsonify({"error": f"No PDFs found with order ID {order_id} in any output folder."}), 404
 
     search_id = f"pv_{int(time.time() * 1000)}"
     with _preview_cache_lock:
         _preview_cache[search_id] = {
-            "folder": str(folder),
+            "folders": match_folders,
             "matches": matches,
             "created": time.time(),
         }
+        
+        # Cleanup old cache entries
         cutoff = time.time() - 1800
         for k in [k for k, v in _preview_cache.items() if v["created"] < cutoff]:
             del _preview_cache[k]
@@ -455,7 +526,7 @@ def module3_page(search_id: str, match_idx: int, page_num: int):
         return jsonify({"error": "Invalid PDF index."}), 400
 
     info = entry["matches"][match_idx]
-    pdf_path = Path(entry["folder"]) / info["filename"]
+    pdf_path = Path(entry["folders"][match_idx]) / info["filename"]
 
     if not pdf_path.is_file():
         return jsonify({"error": "PDF file no longer exists."}), 404
@@ -590,6 +661,251 @@ def module4_search():
             del _preview_cache[k]
 
     return jsonify({"search_id": search_id, "matches": results})
+
+
+# --- Register Polaroid bulk-processing blueprint ---
+from polaroid_tool import polaroid_bp        # noqa: E402
+app.register_blueprint(polaroid_bp)
+
+# --- Module 6: Final Label ---
+
+_M6_SETTING_BASE = "m6_base_folder"
+
+# Regex to find Amazon-style order IDs like 407-6518891-4216357
+_AMAZON_ORDER_RE = re.compile(r"(\d{3})\s*[-—]\s*(\d{7})\s*[-—]\s*(\d{4})\d{3}")
+
+def _extract_label_order_ids_from_page(doc, page_num: int) -> list[dict]:
+    """Extract order IDs from a page that may have 1 or 2 labels (left+right halves).
+    Returns list of dicts: {'order_id_4': str, 'half': 'left'|'right'|'full'}"""
+    page = doc[page_num]
+    pw = page.rect.width
+    ph = page.rect.height
+    results = []
+
+    # Try left half
+    left_rect = fitz.Rect(0, 0, pw / 2, ph)
+    left_text = page.get_text("text", clip=left_rect)
+    left_ids = _AMAZON_ORDER_RE.findall(left_text)
+    if left_ids:
+        results.append({"order_id_4": left_ids[0], "half": "left"})
+
+    # Try right half
+    right_rect = fitz.Rect(pw / 2, 0, pw, ph)
+    right_text = page.get_text("text", clip=right_rect)
+    right_ids = _AMAZON_ORDER_RE.findall(right_text)
+    if right_ids:
+        results.append({"order_id_4": right_ids[0], "half": "right"})
+
+    # If nothing found in halves, try full page
+    if not results:
+        full_text = page.get_text("text")
+        full_ids = _AMAZON_ORDER_RE.findall(full_text)
+        if full_ids:
+            for fid in full_ids:
+                results.append({"order_id_4": fid, "half": "full"})
+
+    return results
+
+@app.route("/final-label/base-folder", methods=["GET"])
+def fl_get_base_folder():
+    folder = get_setting(_M6_SETTING_BASE, "")
+    return jsonify({"folder": folder})
+
+@app.route("/final-label/base-folder", methods=["POST"])
+def fl_set_base_folder():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+    if not folder:
+        return jsonify({"error": "Folder path is required."}), 400
+    p = Path(folder)
+    if not p.is_dir():
+        return jsonify({"error": f"Folder not found: {folder}"}), 400
+    set_setting(_M6_SETTING_BASE, str(p))
+    return jsonify({"ok": True, "folder": str(p)})
+
+@app.route("/final-label/process", methods=["POST"])
+def fl_process():
+    """Process uploaded label PDFs against all output folders in the base folder."""
+    base = get_setting(_M6_SETTING_BASE, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    files = request.files.getlist("pdfs")
+    if not files or all(f.filename == "" for f in files):
+        return jsonify({"error": "No PDF files uploaded."}), 400
+
+    pdf_files = [f for f in files if f.filename and f.filename.lower().endswith(".pdf")]
+    if not pdf_files:
+        return jsonify({"error": "No valid PDF files found."}), 400
+
+    base_path = Path(base)
+
+    # --- Step 1: Parse all labels from uploaded PDFs ---
+    label_docs = []
+    label_map: dict[str, list[dict]] = {} # oid4 -> [{ doc_idx, page_num, half }]
+
+    for f in pdf_files:
+        doc = fitz.open(stream=f.read(), filetype="pdf")
+        doc_idx = len(label_docs)
+        label_docs.append(doc)
+
+        for pn in range(len(doc)):
+            entries = _extract_label_order_ids_from_page(doc, pn)
+            for entry in entries:
+                oid4 = entry["order_id_4"]
+                if oid4 not in label_map:
+                    label_map[oid4] = []
+                label_map[oid4].append({
+                    "doc_idx": doc_idx,
+                    "page_num": pn,
+                    "half": entry["half"],
+                })
+
+    # --- Step 2: Find all output folders ---
+    output_dirs = []
+    for d in sorted(base_path.iterdir(), key=lambda x: x.name.lower()):
+        if d.is_dir() and _OUTPUT_FOLDER_RE.search(d.name):
+            output_dirs.append(d)
+
+    if not output_dirs:
+        for doc in label_docs:
+            doc.close()
+        return jsonify({"error": "No output folders found in base folder."}), 400
+
+    # --- Step 3: For each output folder, match labels ---
+    overall_results = []
+    total_matched = 0
+    total_cancelled = 0
+    total_label_pdfs = 0
+
+    for out_dir in output_dirs:
+        folder_order_ids: set[str] = set()
+        for f in out_dir.iterdir():
+            if f.is_file() and f.suffix.lower() == ".pdf":
+                ids = FOUR_DIGIT_RE.findall(f.name)
+                folder_order_ids.update(ids)
+
+        if not folder_order_ids:
+            continue
+
+        matched_ids = []
+        cancelled_ids = []
+        matched_labels: list[dict] = []
+
+        for oid in sorted(folder_order_ids):
+            if oid in label_map:
+                matched_ids.append(oid)
+                matched_labels.extend(label_map[oid])
+            else:
+                cancelled_ids.append(oid)
+
+        matched_labels.sort(key=lambda x: (x["doc_idx"], x["page_num"]))
+
+        if matched_labels:
+            filtered_doc = fitz.open()
+
+            for lbl in matched_labels:
+                src_doc = label_docs[lbl["doc_idx"]]
+                src_page = src_doc[lbl["page_num"]]
+                pw = src_page.rect.width
+                ph = src_page.rect.height
+
+                if lbl["half"] == "left":
+                    clip = fitz.Rect(0, 0, pw / 2, ph)
+                    new_page = filtered_doc.new_page(width=pw / 2, height=ph)
+                    new_page.show_pdf_page(
+                        fitz.Rect(0, 0, pw / 2, ph), src_doc, lbl["page_num"],
+                        clip=clip
+                    )
+                elif lbl["half"] == "right":
+                    clip = fitz.Rect(pw / 2, 0, pw, ph)
+                    new_page = filtered_doc.new_page(width=pw / 2, height=ph)
+                    new_page.show_pdf_page(
+                        fitz.Rect(0, 0, pw / 2, ph), src_doc, lbl["page_num"],
+                        clip=clip
+                    )
+                else:
+                    filtered_doc.insert_pdf(src_doc, from_page=lbl["page_num"],
+                                            to_page=lbl["page_num"])
+
+            single_labels = fitz.open()
+            for pn in range(len(filtered_doc)):
+                pg = filtered_doc[pn]
+                new_pg = single_labels.new_page(width=HALF_WIDTH, height=A4_HEIGHT)
+                new_pg.show_pdf_page(
+                    fitz.Rect(0, 0, HALF_WIDTH, A4_HEIGHT),
+                    filtered_doc, pn
+                )
+            filtered_doc.close()
+
+            final_doc = fitz.open()
+            total_singles = len(single_labels)
+            for i in range(0, total_singles, 2):
+                new_page = final_doc.new_page(width=A4_WIDTH, height=A4_HEIGHT)
+                dest_left = fitz.Rect(0, 0, HALF_WIDTH, A4_HEIGHT)
+                new_page.show_pdf_page(dest_left, single_labels, i)
+                if i + 1 < total_singles:
+                    dest_right = fitz.Rect(HALF_WIDTH, 0, A4_WIDTH, A4_HEIGHT)
+                    new_page.show_pdf_page(dest_right, single_labels, i + 1)
+            single_labels.close()
+
+            label_pdf_name = f"labels-{out_dir.name}.pdf"
+            label_pdf_path = out_dir / label_pdf_name
+            final_doc.save(str(label_pdf_path))
+            final_doc.close()
+            total_label_pdfs += 1
+
+        report_lines = []
+        report_lines.append(f"Label Report for: {out_dir.name}")
+        report_lines.append("=" * 50)
+        report_lines.append(f"Total orders in folder: {len(folder_order_ids)}")
+        report_lines.append(f"Labels matched: {len(matched_ids)}")
+        report_lines.append(f"Cancelled (no label found): {len(cancelled_ids)}")
+        report_lines.append("")
+
+        if matched_ids:
+            report_lines.append("MATCHED ORDERS:")
+            for oid in matched_ids:
+                report_lines.append(f" {oid} - Label found")
+
+        if cancelled_ids:
+            report_lines.append("")
+            report_lines.append("CANCELLED ORDERS (no label found):")
+            for oid in cancelled_ids:
+                report_lines.append(f" {oid} - CANCELLED")
+
+        report_path = out_dir / "label-report.txt"
+        report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+
+        total_matched += len(matched_ids)
+        total_cancelled += len(cancelled_ids)
+
+        overall_results.append({
+            "folder": out_dir.name,
+            "total_orders": len(folder_order_ids),
+            "matched": len(matched_ids),
+            "cancelled": len(cancelled_ids),
+            "cancelled_ids": cancelled_ids,
+            "label_pdf": label_pdf_name if matched_labels else None,
+        })
+
+    for doc in label_docs:
+        doc.close()
+
+    return jsonify({
+        "results": overall_results,
+        "summary": {
+            "output_folders_processed": len(overall_results),
+            "total_matched": total_matched,
+            "total_cancelled": total_cancelled,
+            "label_pdfs_created": total_label_pdfs,
+            "total_labels_parsed": sum(len(v) for v in label_map.values()),
+            "unique_label_ids": len(label_map),
+        }
+    })
+
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5200)
     

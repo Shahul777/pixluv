@@ -22,6 +22,7 @@
             background: rgba(255,255,255,0.04);
             backdrop-filter: blur(12px);
             border-bottom: 1px solid rgba(255,255,255,0.06);
+            flex-wrap: wrap; gap: 12px;
         }
         .brand {
             font-size: 1.4rem;
@@ -33,7 +34,7 @@
             -webkit-text-fill-color: transparent;
         }
         .nav-subtitle { font-size: .82rem; color: #8888aa; }
-        .container { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px 24px 40px; }
         .alert {
             padding: 14px 20px;
             border-radius: 10px;
@@ -102,7 +103,10 @@
         .form-input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.2); }
         .form-input:disabled { opacity: .4; cursor: not-allowed; }
         .form-input::placeholder { color: #555; }
-
+select.form-input { -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23aaa' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
         .btn {
             padding: 10px 28px; border-radius: 10px; border: none;
             font-size: .88rem; font-weight: 600; cursor: pointer;
@@ -312,7 +316,23 @@
         }
         @keyframes m4spin { to { transform: rotate(360deg); } }
         
-        
+        .tab-bar {
+    display: flex; gap: 4px; padding: 0; margin: 0;
+    list-style: none; flex-wrap: wrap;
+}
+.tab-btn {
+    padding: 8px 18px; border-radius: 8px 8px 0 0; border: none;
+    background: rgba(255,255,255,0.04); color: #888;
+    font-size: .82rem; font-weight: 600; cursor: pointer;
+    transition: all .2s; border-bottom: 2px solid transparent;
+}
+.tab-btn:hover { background: rgba(255,255,255,0.08); color: #ccc; }
+.tab-btn.active {
+    background: rgba(124,58,237,0.15); color: #a78bfa;
+    border-bottom: 2px solid #7c3aed;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
         
         .footer { text-align: center; font-size: .75rem; color: #555; padding: 20px 0; }
         @media (max-width: 640px) {
@@ -331,6 +351,15 @@
         <span class="brand">BASA</span>
         <span class="nav-subtitle">Post-Print Workflow</span>
     </div>
+
+    <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="tab-m5">&#127912; Polaroid Placement</button>
+    <button class="tab-btn" data-tab="tab-m1">&#128196; PDF Combine</button>
+    <button class="tab-btn" data-tab="tab-m6">&#127991; Final Label</button>
+    <button class="tab-btn" data-tab="tab-m2">&#128230; Shipping Labels</button>
+    <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
+    <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button>
+</div>
 </nav>
 
 <div class="container">
@@ -339,7 +368,7 @@
         <span id="m1AlertText"></span>
         <button class="alert-close" onclick="this.parentElement.classList.remove('visible')">&times;</button>
     </div>
-
+<div class="tab-panel" id="tab-m1">
     <div class="module-card" id="m1Card">
         <div class="module-header">
             <div class="step-circle" id="m1Circle">1</div>
@@ -349,26 +378,36 @@
             </span>
         </div>
         <p class="module-desc">
-            Enter the folder path containing your print PDFs. Files with "combined" in the name are
+            Select an <strong>output folder</strong> containing print PDFs. Files with "combined" in the name are
             <strong>deleted first</strong>. Remaining PDFs are sorted by
             <strong>Variant &rarr; Complexity &rarr; Name</strong>, renamed with a numeric prefix,
-            combined into a single lossless PDF, and zipped.
+            combined into a single lossless PDF.
         </p>
 
-        <div class="form-row">
+        <div class="form-row" style="margin-bottom:14px;">
             <div class="form-group">
-                <label for="folder_path">Folder Path</label>
-                <input
-                    class="form-input"
-                    id="folder_path"
-                    placeholder="C:\Users\you\Desktop\PrintPDFs"
-                >
+                <label for="m1Base">Base Folder</label>
+                <input type="text" class="form-input" id="m1Base" placeholder="C:\Users\you\Desktop\Orders">
             </div>
             <div>
-                <button id="m1RunBtn" class="btn btn-primary" onclick="startModule1()">&#9654; Run</button>
+                <button id="m1SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
             </div>
         </div>
 
+        <div class="form-row">
+            <div class="form-group">
+                <label for="m1OutputFolder">Output Folder</label>
+                <select class="form-input" id="m1OutputFolder" disabled>
+                    <option value="">— save base folder first —</option>
+                </select>
+            </div>
+            <div>
+                <button id="m1Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
+            </div>
+            <div>
+                <button id="m1RunBtn" class="btn btn-success" disabled>&#9654; Run</button>
+            </div>
+        </div>
         <div class="progress-section" id="m1Progress">
             <div class="stage-timeline" id="m1Stages">
                 <span class="stage-chip" data-stage="cleanup">Cleanup</span>
@@ -399,16 +438,18 @@
         <div class="progress-detail" id="m1Detail"></div>
         </div>
 
-        <div class="summary-card" id="m1Summary">
-            <h4>&#10003; Completed</h4>
-            <div class="summary-grid">
-                <div class="summary-item">PDFs combined: <span id="sumTotal">-</span></div>
-                <div class="summary-item">Unique Order IDs: <span id="sumIds">-</span></div>
-                <div class="summary-item">Time: <span id="sumTime">-</span></div>
-                <div class="summary-item">Combined PDF: <span id="sumPdf">-</span></div>
-                <div class="summary-item">ZIP file: <span id="sumZip">-</span></div>
-            </div>
-        </div>
+      <div class="summary-card" id="m1Summary">
+    <h4>&#10003; Completed</h4>
+    <div class="summary-grid">
+        <div class="summary-item">Orders: <span id="sumIds">-</span></div>
+        <div class="summary-item">Total Boards: <span id="sumTotal">-</span></div>
+        <div class="summary-item">4x3 Boards: <span id="sumBoards4x3">-</span></div>
+        <div class="summary-item">3x2 Boards: <span id="sumBoards3x2">-</span></div>
+        <div class="summary-item">3x3 Boards: <span id="sumBoards3x3">-</span></div>
+        <div class="summary-item">Time: <span id="sumTime">-</span></div>
+        <div class="summary-item">Combined PDF: <span id="sumPdf">-</span></div>
+    </div>
+</div>
 
         <div class="table-section" id="m1Table">
             <div class="table-title">
@@ -428,10 +469,11 @@
                     </thead>
                     <tbody id="m1Tbody"></tbody>
                 </table>
+                     </div>
             </div>
         </div>
     </div>
-
+    <div class="tab-panel" id="tab-m2">
     <div class="module-card" id="m2Card">
         <div class="module-header">
             <div class="step-circle" id="m2Circle">2</div>
@@ -468,9 +510,10 @@
 
         <div id="m2Status" style="margin-top:14px; display:none;">
             <span id="m2StatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+                 </div>
         </div>
     </div>
-
+    <div class="tab-panel" id="tab-m3">
     <div class="module-card" id="m3Card">
         <div class="module-header">
             <div class="step-circle" id="m3Circle">3</div>
@@ -480,21 +523,28 @@
             </span>
         </div>
                 <p class="module-desc">
-            Enter the folder path containing order PDFs and a <strong>4-digit order ID</strong>.
-            Instantly preview the content of matching PDFs without opening them.
-            If multiple PDFs share the same order ID, use <strong>Prev / Next</strong> to browse.
-        </p>
+    Set a <strong>base folder</strong> and enter a <strong>4-digit order ID</strong>.
+    The tool searches all <strong>ship-output</strong> folders for matching PDFs
+    and lets you instantly preview them. Use <strong>Prev / Next</strong> to browse multiple files.
+</p>
 
-        <div class="form-row">
-            <div class="form-group">
-                <label for="m3Folder">Folder Path</label>
-                <input type="text" class="form-input" id="m3Folder" placeholder="C:\Users\you\Desktop\Orders">
-            </div>
-            <div class="form-group" style="max-width:140px;">
-                <label for="m3OrderId">Order ID</label>
-                <input type="text" class="form-input" id="m3OrderId" placeholder="1234" maxlength="4">
-            </div>
-            <div>
+<div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+        <label for="m3Base">Base Folder</label>
+        <input type="text" class="form-input" id="m3Base" placeholder="C:\Users\you\Desktop\Orders">
+    </div>
+    <div>
+        <button id="m3SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+    </div>
+</div>
+
+<div class="form-row">
+    <div class="form-group" style="max-width:160px;">
+        <label for="m3OrderId">Order ID</label>
+        <input type="text" class="form-input" id="m3OrderId" placeholder="1234" maxlength="4">
+    </div>
+    <div>
+
                 <button id="m3SearchBtn" class="btn btn-primary">&#128269; Search</button>
             </div>
         </div>
@@ -510,8 +560,10 @@
 
         <div id="m3Status" style="margin-top:14px; display:none;">
             <span id="m3StatusText" style="font-size:.84rem;"></span>
+                    </div>
         </div>
     </div>
+     <div class="tab-panel" id="tab-m4">
 <div class="module-card" id="m4Card">
         <div class="module-header">
             <div class="step-circle" id="m4Circle">4</div>
@@ -554,16 +606,277 @@
 
         <div id="m4Status" style="margin-top:14px; display:none;">
             <span id="m4StatusText" style="font-size:.84rem;"></span>
+
+            <div id="m4Status" style="margin-top:14px; display:none;">
+            <span id="m4StatusText" style="font-size:.84rem;"></span>
         </div>
     </div>
-    <p class="footer">Basa Workflow Tools &middot; Flask + PyMuPDF &middot; Local use only</p>
 </div>
+</div>
+
+<div class="tab-panel active" id="tab-m5">
+<div class="module-card" id="m5Card">
+  <div class="module-header">
+    <div class="step-circle" id="m5Circle">5</div>
+    <span class="module-title">
+      Polaroid Image Placement
+      <span class="status-pill pill-pending" id="m5Pill">Ready</span>
+    </span>
+  </div>
+
+  <p class="module-desc">
+    Set a <strong>base folder</strong>, select a <strong>ship-date-image</strong> folder,
+    and bulk-process every order inside it. Each order is detected by its
+    <strong>4-digit ID</strong>, variant (<strong>4x3 / 3x2 / 3x3</strong>), and photo count.
+    Output PDFs are saved into a parallel <strong>ship-date-output</strong> folder automatically.
+  </p>
+
+  <div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+      <label for="m5Base">Base Folder</label>
+      <input type="text" class="form-input" id="m5Base" placeholder="C:\Users\you\Desktop\Orders">
+    </div>
+    <div>
+      <button id="m5SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+      <label for="m5Ship">Ship Folder</label>
+      <select class="form-input" id="m5Ship" disabled>
+        <option value="">-- save base folder first --</option>
+      </select>
+    </div>
+    <div>
+      <button id="m5Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
+    </div>
+    <div>
+      <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+    </div>
+  </div>
+
+  <div class="progress-section" id="m5Progress">
+    <div class="stage-timeline" id="m5Stages">
+      <span class="stage-chip" data-stage="scan">Scan</span>
+      <span class="stage-chip" data-stage="prepare">Prepare</span>
+      <span class="stage-chip" data-stage="process">Process</span>
+      <span class="stage-chip" data-stage="done">Done</span>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="m5Bar"></div>
+        <div class="progress-pct" id="m5Pct">0%</div>
+      </div>
+    </div>
+
+    <div class="progress-meta">
+      <div class="progress-stage">
+        <div class="stage-dot" id="m5Dot"></div>
+        <span id="m5StageLabel">Starting...</span>
+      </div>
+      <span id="m5Eta"></span>
+    </div>
+
+    <div class="progress-detail" id="m5Detail"></div>
+    <div id="m5OrderCurrent" style="margin-top:10px; font-size:.85rem; color:#c4b5fd; font-weight:600; display:none;"></div>
+  </div>
+
+  <div class="summary-card" id="m5Summary">
+    <h4>&#10003; Completed</h4>
+    <div class="summary-grid">
+      <div class="summary-item">Orders processed: <span id="m5SumProcessed"></span></div>
+      <div class="summary-item">Orders skipped: <span id="m5SumSkipped"></span></div>
+      <div class="summary-item">PDFs generated: <span id="m5SumPdfs"></span></div>
+      <div class="summary-item">Time: <span id="m5SumTime"></span></div>
+            <div class="summary-item" style="grid-column:span 2;">Output: <span id="m5SumOutput"></span></div>
+    </div>
+  </div>
+
+  <div class="table-section" id="m5Table">
+    <div class="table-title">
+      Order Results
+      <span class="count-badge" id="m5Count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Folder</th>
+            <th>Order ID</th>
+            <th>Variant</th>
+            <th>Photos</th>
+            <th>PDFs</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="m5Tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="border-top: 1px solid rgba(255,255,255,.08); margin-top: 24px; padding-top: 20px;">
+    <h4 style="color:#c4b5fd; font-size:.95rem; margin-bottom:12px;">&#128269; Order Search</h4>
+    <p class="module-desc" style="margin-bottom:14px;">
+      Enter a <strong>4-digit order ID</strong> to search across all ship-image and output folders in the base folder.
+    </p>
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group" style="max-width:160px;">
+        <label for="m5SearchId">Order ID</label>
+        <input type="text" class="form-input" id="m5SearchId" placeholder="1234" maxlength="4">
+      </div>
+      <div>
+        <button id="m5SearchBtn" class="btn btn-primary" style="padding:10px 18px;">&#128269; Search</button>
+      </div>
+    </div>
+
+    <div id="m5SearchSummary" style="display:none; margin-bottom:14px;">
+      <div class="summary-card" style="margin-top:0;">
+        <h4 id="m5SearchTitle">Search Results</h4>
+        <div class="summary-grid">
+          <div class="summary-item">Order ID: <span id="m5SearchOid"></span></div>
+          <div class="summary-item">Total matches: <span id="m5SearchTotal"></span></div>
+          <div class="summary-item">Input folders: <span id="m5SearchInput"></span></div>
+          <div class="summary-item">Output PDFs: <span id="m5SearchOutput"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-section" id="m5SearchTable" style="display:none;">
+      <div class="table-title">
+        Matches
+        <span class="count-badge" id="m5SearchCount">0</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Ship Folder</th>
+              <th>Type</th>
+              <th>Name</th>
+              <th>Variant</th>
+              <th>Photos</th>
+            </tr>
+          </thead>
+          <tbody id="m5SearchTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="m5SearchStatus" style="margin-top:10px; display:none;">
+      <span id="m5SearchStatusText" style="font-size:.84rem;"></span>
+    </div>
+  </div>
+</div>
+</div>
+<div class="tab-panel" id="tab-m6">
+  <div class="module-card" id="m6Card">
+    <div class="module-header">
+      <div class="step-circle" id="m6Circle">6</div>
+      <span class="module-title">
+        Final Label
+        <span class="status-pill pill-pending" id="m6Pill">Ready</span>
+      </span>
+    </div>
+
+    <p class="module-desc">
+      Upload the <strong>shipping labels PDF</strong> (output from Shipping Labels tool).
+      The tool extracts order IDs from each label, matches them against PDFs in all
+      <strong>ship-output</strong> folders, creates a filtered label PDF per output folder,
+      and generates a <strong>label-report.txt</strong> showing matched and <strong>cancelled</strong> orders.
+    </p>
+
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="m6Base">Base Folder</label>
+        <input type="text" class="form-input" id="m6Base" placeholder="C:\Users\you\Desktop\Orders">
+      </div>
+      <div>
+        <button id="m6SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="m6Files">Label PDFs</label>
+        <input type="file" class="form-input" id="m6Files" accept=".pdf" multiple>
+      </div>
+      <div>
+        <button id="m6RunBtn" class="btn btn-success" disabled>&#9654; Process</button>
+      </div>
+    </div>
+
+    <div id="m6Status" style="margin-top:14px; display:none;">
+      <span id="m6StatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+    </div>
+
+    <div class="summary-card" id="m6Summary">
+      <h4>&#10003; Completed</h4>
+      <div class="summary-grid">
+        <div class="summary-item">Output folders processed: <span id="m6SumFolders">&ndash;</span></div>
+        <div class="summary-item">Labels parsed: <span id="m6SumParsed">&ndash;</span></div>
+        <div class="summary-item">Unique label IDs: <span id="m6SumUnique">&ndash;</span></div>
+        <div class="summary-item">Total matched: <span id="m6SumMatched">&ndash;</span></div>
+        <div class="summary-item">Total cancelled: <span id="m6SumCancelled">&ndash;</span></div>
+        <div class="summary-item">Label PDFs created: <span id="m6SumPdfs">&ndash;</span></div>
+      </div>
+    </div>
+
+    <div class="table-section" id="m6Table">
+      <div class="table-title">
+        Results by Output Folder
+        <span class="count-badge" id="m6Count">0</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Output Folder</th>
+              <th>Total Orders</th>
+              <th>Matched</th>
+              <th>Cancelled</th>
+              <th>Cancelled IDs</th>
+              <th>Label PDF</th>
+            </tr>
+          </thead>
+          <tbody id="m6Tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<script>
+// --- Tab switching ----------------------------------------------
+(function () {
+    var tabBtns = document.querySelectorAll('#tabBar .tab-btn');
+    var tabPanels = document.querySelectorAll('.tab-panel');
+    tabBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            tabBtns.forEach(function (b) { b.classList.remove('active'); });
+            tabPanels.forEach(function (p) { p.classList.remove('active'); });
+            btn.classList.add('active');
+            var panel = document.getElementById(btn.dataset.tab);
+            if (panel) panel.classList.add('active');
+        });
+    });
+})();
+</script>
 
 <script>
 (function () {
-    const STAGE_ORDER = ['cleanup','scan','sort','rename','combine','zip','report','done'];
+    const STAGE_ORDER = ['cleanup', 'scan', 'sort', 'rename', 'combine', 'report', 'done'];
 
-    const $input     = document.getElementById('folder_path');
+    const $baseInput = document.getElementById('m1Base');
+    const $saveBase  = document.getElementById('m1SaveBase');
+    const $outputSel = document.getElementById('m1OutputFolder');
+    const $refresh   = document.getElementById('m1Refresh');
     const $btn       = document.getElementById('m1RunBtn');
     const $circle    = document.getElementById('m1Circle');
     const $pill      = document.getElementById('m1Pill');
@@ -583,6 +896,64 @@
 
     let completedStages = new Set();
 
+    // --- Load saved base folder on init ---
+    fetch('/module1/base-folder').then(r => r.json()).then(data => {
+        if (data.folder) {
+            $baseInput.value = data.folder;
+            loadOutputFolders();
+        }
+    });
+
+    $saveBase.addEventListener('click', function () {
+        const folder = $baseInput.value.trim();
+        if (!folder) { showAlert('danger', 'Enter a base folder path.'); return; }
+
+        fetch('/module1/base-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder: folder })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { showAlert('danger', data.error); return; }
+            $baseInput.value = data.folder;
+            loadOutputFolders();
+        });
+    });
+
+    // --- Load output folders into dropdown ---
+    function loadOutputFolders() {
+        $outputSel.disabled = true;
+        $outputSel.innerHTML = '<option value="">Loading...</option>';
+        $refresh.disabled = true;
+        $btn.disabled = true;
+
+        fetch('/module1/output-folders').then(r => r.json()).then(data => {
+            if (data.error) {
+                $outputSel.innerHTML = '<option value="">— ' + data.error + ' —</option>';
+                return;
+            }
+            if (!data.folders.length) {
+                $outputSel.innerHTML = '<option value="">— No output folders found —</option>';
+                $refresh.disabled = false;
+                return;
+            }
+            var opts = '<option value="">— Select output folder —</option>';
+            data.folders.forEach(function (f) {
+                opts += '<option value="' + f.path.replace(/"/g, '&quot;') + '">'
+                     + f.name + ' (' + f.pdf_count + ' PDFs)</option>';
+            });
+            $outputSel.innerHTML = opts;
+            $outputSel.disabled = false;
+            $refresh.disabled = false;
+        });
+    }
+
+    $refresh.addEventListener('click', loadOutputFolders);
+
+    $outputSel.addEventListener('change', function () {
+        $btn.disabled = !$outputSel.value;
+    });
     function showAlert(type, msg) {
         $alert.className = 'alert alert-' + type + ' visible';
         $alertTx.textContent = msg;
@@ -639,16 +1010,23 @@
         });
     }
 
-    window.startModule1 = function () {
-        const folder = $input.value.trim();
+function enableControls() {
+        $btn.disabled = !$outputSel.value;
+        $outputSel.disabled = false;
+        $refresh.disabled = false;
+    }
+
+    $btn.addEventListener('click', function () {
+        const folder = $outputSel.value;
         if (!folder) {
-            showAlert('danger', 'Please enter a folder path.');
+            showAlert('danger', 'Please select an output folder.');
             return;
         }
 
         resetUI();
         $btn.disabled = true;
-        $input.disabled = true;
+        $outputSel.disabled = true;
+        $refresh.disabled = true;
         $pill.className = 'status-pill pill-running';
         $pill.innerHTML = '&#9679; Running';
         $progress.classList.add('visible');
@@ -662,8 +1040,7 @@
         .then(data => {
             if (data.error) {
                 showAlert('danger', data.error);
-                $btn.disabled = false;
-                $input.disabled = false;
+         enableControls();
                 $pill.className = 'status-pill pill-pending';
                 $pill.textContent = 'Ready';
                 return;
@@ -672,10 +1049,9 @@
         })
         .catch(err => {
             showAlert('danger', 'Request failed: ' + err.message);
-            $btn.disabled = false;
-            $input.disabled = false;
+            enableControls();
         });
-    };
+        });
 
     function subscribeSSE(taskId) {
         const es = new EventSource('/module1/progress/' + encodeURIComponent(taskId));
@@ -697,8 +1073,7 @@
                 $pill.style.background = 'rgba(239,68,68,0.15)';
                 $pill.style.color = '#f87171';
                 $pill.textContent = 'Error';
-                $btn.disabled = false;
-                $input.disabled = false;
+                enableControls();
                 return;
             }
                         const pct = Math.min(d.pct, 100);
@@ -726,8 +1101,11 @@
 
                 if (d.result) {
                     const r = d.result;
-                    document.getElementById('sumTotal').textContent = r.total;
-                    document.getElementById('sumIds').textContent = r.unique_ids || '-';
+                 document.getElementById('sumTotal').textContent = r.total_boards;
+            document.getElementById('sumIds').textContent = r.unique_ids || '-';
+            document.getElementById('sumBoards4x3').textContent = r.boards_4x3;
+            document.getElementById('sumBoards3x2').textContent = r.boards_3x2;
+            document.getElementById('sumBoards3x3').textContent = r.boards_3x3;
                     document.getElementById('sumTime').textContent = r.elapsed + 's';
                     document.getElementById('sumPdf').textContent = r.combined_pdf;
                     document.getElementById('sumZip').textContent = r.zip_file;
@@ -748,8 +1126,7 @@
                     }
                 }
 
-                $btn.disabled = false;
-                $input.disabled = false;
+        enableControls();
             }
         };
 
@@ -757,8 +1134,7 @@
             es.close();
             $stage.textContent = 'Connection lost';
             $dot.classList.add('error');
-            $btn.disabled = false;
-            $input.disabled = false;
+            enableControls();
         };
     }
 
@@ -768,9 +1144,7 @@
         return d.innerHTML;
     }
 
-    $input.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); startModule1(); }
-    });
+
 })();
 
 (function () {
@@ -842,7 +1216,8 @@
 (function () {
     let m3State = null; // { search_id, matches, currentIdx }
 
-    const $folder    = document.getElementById('m3Folder');
+    const $baseInput = document.getElementById('m3Base');
+    const $saveBase  = document.getElementById('m3SaveBase');
     const $orderId   = document.getElementById('m3OrderId');
     const $btn       = document.getElementById('m3SearchBtn');
     const $pill      = document.getElementById('m3Pill');
@@ -855,6 +1230,28 @@
     const $nextBtn   = document.getElementById('m3NextPdf');
     const $status    = document.getElementById('m3Status');
     const $statusTx  = document.getElementById('m3StatusText');
+
+    fetch('/module3/base-folder').then(r => r.json()).then(data => {
+        if (data.folder) { $baseInput.value = data.folder; }
+    });
+
+    // --- Save base folder ---
+    $saveBase.addEventListener('click', function () {
+        const folder = $baseInput.value.trim();
+        if (!folder) { showStatus('Enter a base folder path.', '#f87171'); return; }
+
+        fetch('/module3/base-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder: folder })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { showStatus(data.error, '#f87171'); return; }
+            $baseInput.value = data.folder;
+            showStatus('Base folder saved.', '#4ade80');
+        });
+    });
 
     function showStatus(msg, color) {
         $statusTx.textContent = msg;
@@ -872,10 +1269,10 @@
     }
 
     function doSearch() {
-        const folder = $folder.value.trim();
+
         const orderId = $orderId.value.trim();
 
-        if (!folder) { showStatus('Please enter a folder path.', '#f87171'); return; }
+      
         if (!/^\d{4}$/.test(orderId)) { showStatus('Order ID must be exactly 4 digits.', '#f87171'); return; }
 
         resetM3();
@@ -886,7 +1283,7 @@
         fetch('/module3/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ folder_path: folder, order_id: orderId }),
+            body: JSON.stringify({  order_id: orderId }),
         })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
         .then(function (res) {
@@ -920,9 +1317,11 @@
         var s = m3State, match = s.matches[s.currentIdx];
 
         $pdfNav.style.display = s.matches.length > 1 ? 'flex' : 'none';
+        var folderInfo = match.folder_name ? ' &nbsp;|&nbsp; ' + escHtml3(match.folder_name) : '';
         $pdfLabel.innerHTML =
             escHtml3(match.filename) +
             '<small>' + match.page_count + ' page' + (match.page_count > 1 ? 's' : '') +
+                folderInfo + '</small>';
             (s.matches.length > 1 ? '&nbsp;|&nbsp; PDF ' + (s.currentIdx + 1) + ' of ' + s.matches.length : '') +
             '</small>';
 
@@ -958,8 +1357,7 @@
     $prevBtn.addEventListener('click', function () { changePdf(-1); });
     $nextBtn.addEventListener('click', function () { changePdf(1); });
     $orderId.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
-    $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
-
+    
     $orderId.addEventListener('input', function () {
         this.value = this.value.replace(/[^0-9]/g, '');
     });
@@ -1104,9 +1502,497 @@
     $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doFind(); } });
 })();
 </script>
+<script>
+(function () {
+  var M5_STAGES = ['scan','prepare','process','done'];
+
+  var $base       = document.getElementById('m5Base');
+  var $saveBase   = document.getElementById('m5SaveBase');
+  var $ship       = document.getElementById('m5Ship');
+  var $refresh    = document.getElementById('m5Refresh');
+  var $runBtn     = document.getElementById('m5RunBtn');
+  var $circle     = document.getElementById('m5Circle');
+  var $pill       = document.getElementById('m5Pill');
+  var $progress   = document.getElementById('m5Progress');
+  var $bar        = document.getElementById('m5Bar');
+  var $pct        = document.getElementById('m5Pct');
+  var $dot        = document.getElementById('m5Dot');
+  var $stage      = document.getElementById('m5StageLabel');
+  var $eta        = document.getElementById('m5Eta');
+  var $detail     = document.getElementById('m5Detail');
+  var $orderCur   = document.getElementById('m5OrderCurrent');
+  var $summary    = document.getElementById('m5Summary');
+  var $table      = document.getElementById('m5Table');
+  var $tbody      = document.getElementById('m5Tbody');
+  var $count      = document.getElementById('m5Count');
+
+  var completedStages = new Set();
+
+  function escH5(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function setChip(name, state) {
+    document.querySelectorAll('#m5Stages .stage-chip').forEach(function (c) {
+      if (c.dataset.stage === name) {
+        c.classList.remove('active','completed','errored');
+        c.classList.add(state);
+      }
+    });
+  }
+
+  function markPrior(cur) {
+    var idx = M5_STAGES.indexOf(cur);
+    for (var i = 0; i < idx; i++) {
+      if (!completedStages.has(M5_STAGES[i])) {
+        completedStages.add(M5_STAGES[i]);
+        setChip(M5_STAGES[i], 'completed');
+      }
+    }
+  }
+
+  function resetM5() {
+    $progress.classList.remove('visible');
+    $summary.classList.remove('visible');
+    $table.classList.remove('visible');
+    $bar.style.width = '0%';
+    $bar.classList.remove('done','error');
+    $pct.textContent = '0%';
+    $dot.classList.remove('done','error');
+    $stage.textContent = 'Starting...';
+    $eta.textContent = '';
+    $detail.textContent = '';
+    $orderCur.style.display = 'none';
+    $orderCur.textContent = '';
+    $tbody.innerHTML = '';
+    $count.textContent = '0';
+    $circle.classList.remove('done');
+    $pill.className = 'status-pill pill-pending';
+    $pill.textContent = 'Ready';
+    completedStages = new Set();
+    document.querySelectorAll('#m5Stages .stage-chip').forEach(function (c) {
+      c.classList.remove('active','completed','errored');
+    });
+  }
+
+  /* --- Load saved base folder on page load --- */
+  fetch('/polaroid/base-folder')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+          if (d.folder) {
+        $base.value = d.folder;
+        loadShipFolders();
+      }
+    })
+    .catch(function () {});
+
+  /* --- Save base folder --- */
+  $saveBase.addEventListener('click', function () {
+    var folder = $base.value.trim();
+    if (!folder) return;
+    $saveBase.disabled = true;
+    fetch('/polaroid/base-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: folder })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) { alert(d.error); return; }
+      $base.value = d.folder;
+      loadShipFolders();
+    })
+    .catch(function (e) { alert('Failed: ' + e.message); })
+    .finally(function () { $saveBase.disabled = false; });
+  });
+
+  /* --- Load ship folders --- */
+  function loadShipFolders() {
+    $ship.disabled = true;
+    $ship.innerHTML = '<option value="">Loading...</option>';
+    $refresh.disabled = true;
+    $runBtn.disabled = true;
+
+    fetch('/polaroid/ship-folders')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) {
+          $ship.innerHTML = '<option value="">Error: ' + escH5(d.error) + '</option>';
+          return;
+        }
+        if (!d.folders.length) {
+          $ship.innerHTML = '<option value="">No ship folders found</option>';
+          return;
+        }
+        var opts = '<option value="">-- Select ship folder --</option>';
+        d.folders.forEach(function (f) {
+          opts += '<option value="' + escH5(f.path) + '">' +
+                  escH5(f.name) + ' (' + f.order_count + ' orders)</option>';
+        });
+        $ship.innerHTML = opts;
+        $ship.disabled = false;
+        $refresh.disabled = false;
+      })
+      .catch(function () {
+        $ship.innerHTML = '<option value="">Failed to load</option>';
+      });
+  }
+
+  $refresh.addEventListener('click', function () { loadShipFolders(); });
+
+  $ship.addEventListener('change', function () {
+    $runBtn.disabled = !this.value;
+  });
+
+  /* --- Start bulk processing --- */
+  $runBtn.addEventListener('click', function () {
+    var shipFolder = $ship.value;
+    if (!shipFolder) return;
+
+    resetM5();
+    $runBtn.disabled = true;
+    $ship.disabled = true;
+    $refresh.disabled = true;
+    $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+    $progress.classList.add('visible');
+
+    fetch('/polaroid/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.error) {
+        alert(data.error);
+        resetM5();
+        $runBtn.disabled = false;
+        $ship.disabled = false;
+        $refresh.disabled = false;
+        return;
+      }
+      subscribeM5(data.task_id);
+    })
+    .catch(function (err) {
+      alert('Request failed: ' + err.message);
+      $runBtn.disabled = false;
+      $ship.disabled = false;
+      $refresh.disabled = false;
+    });
+  });
+
+  function subscribeM5(taskId) {
+    var es = new EventSource('/polaroid/progress/' + encodeURIComponent(taskId));
+
+    es.onmessage = function (ev) {
+      var d = JSON.parse(ev.data);
+
+      if (d.error) {
+        es.close();
+        $bar.style.width = '100%';
+        $bar.classList.add('error');
+        $pct.textContent = 'Error';
+        $dot.classList.add('error');
+        $stage.textContent = 'Failed';
+        $detail.textContent = d.error;
+        $eta.textContent = '';
+        setChip(d.stage || 'error', 'errored');
+        $pill.className = 'status-pill';
+        $pill.style.background = 'rgba(239,68,68,0.15)';
+        $pill.style.color = '#f87171';
+        $pill.textContent = 'Error';
+        enableControls();
+        return;
+      }
+
+      var pct = Math.min(d.pct, 100);
+      $bar.style.width = pct + '%';
+      $pct.textContent = pct + '%';
+      $stage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+      $detail.textContent = d.detail || '';
+
+      if (d.order_name) {
+        $orderCur.style.display = 'block';
+        $orderCur.textContent = '📁 ' + d.order_name +
+          (d.order_total ? ' (' + (d.order_index + 1) + '/' + d.order_total + ')' : '');
+      }
+
+      markPrior(d.stage);
+      if (!d.done) setChip(d.stage, 'active');
+
+      if (d.done) {
+        es.close();
+        completedStages.add(d.stage);
+        M5_STAGES.forEach(function (s) { setChip(s, 'completed'); });
+        $bar.classList.add('done');
+        $dot.classList.add('done');
+        $circle.classList.add('done');
+        $pill.className = 'status-pill pill-done';
+        $pill.innerHTML = '&#10003; Done';
+        $orderCur.style.display = 'none';
+              if (d.result) {
+        var r = d.result;
+        document.getElementById('m5SumProcessed').textContent = r.processed;
+        document.getElementById('m5SumSkipped').textContent = r.skipped;
+        document.getElementById('m5SumPdfs').textContent = r.total_pdfs;
+        document.getElementById('m5SumTime').textContent = r.elapsed + 's';
+        document.getElementById('m5SumOutput').textContent = r.output_folder;
+        $summary.classList.add('visible');
+
+        if (r.orders && r.orders.length) {
+          $count.textContent = r.orders.length;
+          $tbody.innerHTML = r.orders.map(function (o, i) {
+            var statusTag = o.status === 'done'
+              ? '<span class="tag" style="background:rgba(34,197,94,.15);color:#4ade80;">Done</span>'
+              : o.status === 'skipped'
+                ? '<span class="tag" style="background:rgba(234,179,8,.15);color:#fbbf24;">Skipped</span>'
+                : '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + escH5(o.status) + '</span>';
+            return '<tr>' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td><span class="code-name">' + escH5(o.folder) + '</span></td>' +
+              '<td><span class="tag tag-id">' + escH5(o.order_id) + '</span></td>' +
+              '<td><span class="tag tag-variant">' + escH5(o.variant) + '</span></td>' +
+              '<td>' + o.photos + '</td>' +
+              '<td>' + o.pdfs + '</td>' +
+              '<td>' + statusTag + '</td>' +
+              '</tr>';
+          }).join('');
+          $table.classList.add('visible');
+        }
+      }
+      enableControls();
+    }
+  };
+
+  es.onerror = function () {
+    es.close();
+    $stage.textContent = 'Connection lost';
+    $dot.classList.add('error');
+    enableControls();
+  };
+}
+
+function enableControls() {
+  $runBtn.disabled = !$ship.value;
+  $ship.disabled = false;
+  $refresh.disabled = false;
+}
+
+// --- Order Search ----------------------------------------------------
+var $searchBtn       = document.getElementById('m5SearchBtn');
+var $searchId        = document.getElementById('m5SearchId');
+var $searchSummary   = document.getElementById('m5SearchSummary');
+var $searchTable     = document.getElementById('m5SearchTable');
+var $searchTbody     = document.getElementById('m5SearchTbody');
+var $searchCount     = document.getElementById('m5SearchCount');
+var $searchStatus    = document.getElementById('m5SearchStatus');
+var $searchStatusTx  = document.getElementById('m5SearchStatusText');
+
+$searchBtn.addEventListener('click', function () {
+  var oid = $searchId.value.trim();
+  if (!/^\d{4}$/.test(oid)) {
+    $searchStatusTx.textContent = 'Enter a valid 4-digit order ID.';
+    $searchStatusTx.style.color = '#f87171';
+    $searchStatus.style.display = 'block';
+    return;
+  }
+
+  $searchBtn.disabled = true;
+  $searchStatus.style.display = 'block';
+  $searchStatusTx.style.color = '#60a5fa';
+  $searchStatusTx.textContent = 'Searching...';
+  $searchSummary.style.display = 'none';
+  $searchTable.style.display = 'none';
+
+      fetch('/polaroid/order-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: oid })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      $searchBtn.disabled = false;
+      if (data.error) {
+        $searchStatusTx.style.color = '#f87171';
+        $searchStatusTx.textContent = data.error;
+        return;
+      }
+      $searchStatus.style.display = 'none';
+
+      var s = data.summary;
+      document.getElementById('m5SearchOid').textContent = data.order_id;
+      document.getElementById('m5SearchTotal').textContent = s.total;
+      document.getElementById('m5SearchInput').textContent = s.input_folders;
+      document.getElementById('m5SearchOutput').textContent = s.output_pdfs;
+      document.getElementById('m5SearchTitle').innerHTML = s.total > 0
+        ? '&#128269; Found Order ' + escH5(data.order_id)
+        : '&#10060; Order ' + escH5(data.order_id) + ' not found';
+      $searchSummary.style.display = 'block';
+
+      if (data.results.length) {
+        $searchCount.textContent = data.results.length;
+        $searchTbody.innerHTML = data.results.map(function (r, i) {
+          var typeTag = r.type === 'input'
+            ? '<span class="tag" style="background:rgba(96,165,250,.15);color:#60a5fa;">Input</span>'
+            : '<span class="tag" style="background:rgba(52,211,153,.15);color:#34d399;">Output</span>';
+          return '<tr>' +
+            '<td>' + (i + 1) + '</td>' +
+            '<td><span class="code-name">' + escH5(r.ship_folder) + '</span></td>' +
+            '<td>' + typeTag + '</td>' +
+            '<td>' + escH5(r.name) + '</td>' +
+            '<td><span class="tag tag-variant">' + escH5(r.variant) + '</span></td>' +
+            '<td>' + (r.photos != null ? r.photos : '-') + '</td>' +
+            '</tr>';
+        }).join('');
+        $searchTable.style.display = 'block';
+      }
+    })
+    .catch(function (err) {
+      $searchBtn.disabled = false;
+      $searchStatusTx.style.color = '#f87171';
+      $searchStatusTx.textContent = 'Request failed: ' + err.message;
+    });
+});
+
+$searchId.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { e.preventDefault(); $searchBtn.click(); }
+});
+})();
+</script>
+
+<script>
+// --- Module 6: Final Label -------------------------------------------
+(function () {
+  var $baseInput = document.getElementById('m6Base');
+  var $saveBase  = document.getElementById('m6SaveBase');
+  var $files     = document.getElementById('m6Files');
+  var $runBtn    = document.getElementById('m6RunBtn');
+  var $pill      = document.getElementById('m6Pill');
+  var $circle    = document.getElementById('m6Circle');
+  var $status    = document.getElementById('m6Status');
+  var $statusTx  = document.getElementById('m6StatusText');
+  var $summary   = document.getElementById('m6Summary');
+  var $table     = document.getElementById('m6Table');
+  var $tbody     = document.getElementById('m6Tbody');
+  var $count     = document.getElementById('m6Count');
+
+  // Load saved base folder
+  fetch('/final-label/base-folder').then(function (r) { return r.json(); }).then(function (data) {
+    if (data.folder) { $baseInput.value = data.folder; }
+  });
+
+    // Save base folder
+    $saveBase.addEventListener('click', function () {
+      var folder = $baseInput.value.trim();
+      if (!folder) { showStatus('Enter a base folder path.', '#f87171'); return; }
+
+      fetch('/final-label/base-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: folder })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { showStatus(data.error, '#f87171'); return; }
+        $baseInput.value = data.folder;
+        showStatus('Base folder saved.', '#4ade80');
+      });
+    });
+
+    // Enable run button when files selected
+    $files.addEventListener('change', function () {
+      $runBtn.disabled = !$files.files.length;
+    });
+
+    function showStatus(msg, color) {
+      $statusTx.textContent = msg;
+      $statusTx.style.color = color || '#60a5fa';
+      $status.style.display = 'block';
+    }
+
+    function escH6(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Process
+    $runBtn.addEventListener('click', function () {
+      if (!$files.files.length) { showStatus('Please select label PDF files.', '#f87171'); return; }
+
+      $runBtn.disabled = true;
+      $pill.className = 'status-pill pill-running';
+      $pill.innerHTML = '&#9679; Processing';
+      $summary.classList.remove('visible');
+      $table.classList.remove('visible');
+      showStatus('Uploading and processing labels...', '#60a5fa');
+
+      var formData = new FormData();
+      for (var i = 0; i < $files.files.length; i++) {
+        formData.append('pdfs', $files.files[i]);
+        
+      }
+
+      fetch('/final-label/process', {
+        method: 'POST',
+        body: formData
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) {
+          showStatus(data.error, '#f87171');
+          $pill.className = 'status-pill pill-pending';
+          $pill.textContent = 'Ready';
+          $runBtn.disabled = false;
+          return;
+        }
+
+        $status.style.display = 'none';
+        $pill.className = 'status-pill pill-done';
+        $pill.innerHTML = '&#10003; Done';
+        $circle.classList.add('done');
+
+        var s = data.summary;
+        document.getElementById('m6SumFolders').textContent = s.output_folders_processed;
+        document.getElementById('m6SumParsed').textContent = s.total_labels_parsed;
+        document.getElementById('m6SumUnique').textContent = s.unique_label_ids;
+        document.getElementById('m6SumMatched').textContent = s.total_matched;
+        document.getElementById('m6SumCancelled').textContent = s.total_cancelled;
+        document.getElementById('m6SumPdfs').textContent = s.label_pdfs_created;
+        $summary.classList.add('visible');
+
+        if (data.results && data.results.length) {
+          $count.textContent = data.results.length;
+          $tbody.innerHTML = data.results.map(function (r, i) {
+            var cancelledStr = r.cancelled_ids.length
+              ? r.cancelled_ids.map(function (id) {
+                  return '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + escH6(id) + '</span>';
+                }).join(' ')
+              : '<span style="color:#4ade80;">None</span>';
+              
+            return '<tr>' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td><span class="code-name">' + escH6(r.folder) + '</span></td>' +
+              '<td>' + r.total_orders + '</td>' +
+              '<td><span style="color:#4ade80;font-weight:600;">' + r.matched + '</span></td>' +
+              '<td><span style="color:' + (r.cancelled > 0 ? '#f87171' : '#4ade80') + ';font-weight:600;">' + r.cancelled + '</span></td>' +
+              '<td>' + (r.label_pdf ? escH6(r.label_pdf) : '-') + '</td>' +
+              '</tr>';
+          }).join('');
+          $table.classList.add('visible');
+        }
+
+        $runBtn.disabled = false;
+      })
+      .catch(function (err) {
+        showStatus('Request failed: ' + err.message, '#f87171');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        $runBtn.disabled = false;
+      });
+    });
+})();
+</script>
 
 </body>
 </html>
-
-        
                 

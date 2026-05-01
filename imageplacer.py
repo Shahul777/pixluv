@@ -17,6 +17,7 @@ from reportlab.pdfgen import canvas
 from PIL import ImageEnhance
 from PIL import ImageFilter
 from PIL import ImageStat
+from natsort import natsorted
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
@@ -316,7 +317,7 @@ def generate():
     work_dir = tempfile.mkdtemp(prefix="basa_upload_")
     try:
         saved_paths: list[str] = []
-        for f in sorted(valid_files, key=lambda x: x.filename.lower()):
+        for f in natsorted(valid_files, key=lambda x: x.filename.lower()):
             safe_name = secure_filename(f.filename)
             if not safe_name:
                 continue

@@ -1,0 +1,424 @@
+import json
+import math
+import os
+import queue
+import re
+import threading
+import time
+from pathlib import Path
+
+from natsort import natsorted
+from flask import Blueprint, Response, jsonify, request
+
+from db import get_setting, set_setting, log_activity
+
+# --- Import image-placement engine from imageplacer.py ---
+from imageplacer import LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf
+
+polaroid_bp = Blueprint("polaroid", __name__)
+
+# --- Progress infrastructure (same pattern as Module 1 in app.py) ---
+_pq: dict[str, queue.Queue] = {}
+_pq_lock = threading.Lock()
+
+SETTING_BASE_FOLDER = "polaroid_base_folder"
+
+# Variant regex: ends with -3x2 or -3x3 (case-insensitive)
+_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23])\s*$", re.IGNORECASE)
+
+# Ship-folder pattern: contains "ship" and "image" (flexible date formats)
+_SHIP_FOLDER_RE = re.compile(r"ship.*image", re.IGNORECASE)
+
+# Special multi-set indicators in folder name
+_SPECIAL_RE = re.compile(r"(q\d+|set\d+)", re.IGNORECASE)
+
+# Four-digit order-id extractor from folder name
+_ORDER_ID_RE = re.compile(r"-(\d{4})(?:-|$)")
+
+# Layout keys mapped by variant shorthand
+_VARIANT_TO_LAYOUT = {
+    "4x3": "4x3_polaroid_18",
+    "3x2": "3x2_polaroid_36",
+    "3x3": "3x3_square_24",
+}
+
+_UPS = {
+    "4x3": 18,
+    "3x2": 36,
+    "3x3": 24,
+}
+def _new_q(task_id: str) -> queue.Queue:
+    q: queue.Queue = queue.Queue()
+    with _pq_lock:
+        _pq[task_id] = q
+    return q
+
+def _get_q(task_id: str) -> queue.Queue | None:
+    with _pq_lock:
+        return _pq.get(task_id)
+
+def _del_q(task_id: str):
+    with _pq_lock:
+        _pq.pop(task_id, None)
+
+def _emit(q: queue.Queue, **kw):
+    q.put(kw)
+
+def _detect_variant(folder_name: str) -> str:
+    """Return '3x2', '3x3', or '4x3' based on folder name suffix."""
+    m = _VARIANT_SUFFIX_RE.search(folder_name)
+    if m:
+        return m.group(1).lower()
+    return "4x3"
+
+def _extract_order_id(folder_name: str) -> str | None:
+    m = _ORDER_ID_RE.search(folder_name)
+    return m.group(1) if m else None
+
+def _is_special(folder_name: str) -> bool:
+    """True if folder name contains q1, q2, set1, set2 etc."""
+    return bool(_SPECIAL_RE.search(folder_name))
+
+def _collect_images(folder: Path) -> list[str]:
+    """Return sorted list of image file paths inside a folder."""
+    imgs = []
+    for f in folder.iterdir():
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+            imgs.append(str(f))
+    imgs = natsorted(imgs, key=lambda p: Path(p).name.lower())
+    return imgs
+
+def _output_folder_for(ship_folder: Path) -> Path:
+    """ship-30-4-image -> ship-30-4-output (sibling folder)."""
+    name = ship_folder.name
+    # Replace last occurrence of "image" with "output"
+    if "image" in name.lower():
+        idx = name.lower().rfind("image")
+        out_name = name[:idx] + "output" + name[idx + 5:]
+    else:
+        out_name = name + "-output"
+    return ship_folder.parent / out_name
+
+def _pdf_already_exists(output_dir: Path, order_id: str | None, folder_name: str, is_special: bool) -> bool:
+    """Check if output PDF for this order already exists.
+    Skip only if NOT a special (q/set) order and a matching PDF is present."""
+    if is_special or order_id is None:
+        return False
+    for f in output_dir.iterdir():
+        if not f.is_file() or f.suffix.lower() != ".pdf":
+            continue
+        if order_id in f.stem:
+            return True
+    return False
+
+# --- Core processing thread ---
+
+def _run_polaroid(ship_folder_path: str, task_id: str):
+    q = _get_q(task_id)
+    if q is None:
+        return
+
+    t0 = time.perf_counter()
+
+    try:
+        ship_folder = Path(ship_folder_path)
+        if not ship_folder.is_dir():
+            _emit(q, stage="error", pct=0, detail="", done=True,
+                  error=f"Folder not found: {ship_folder_path}")
+            return
+
+        # --- Stage: scan -----------------------------------------
+        _emit(q, stage="scan", pct=0, detail="Scanning order folders...", done=False)
+
+        order_dirs = []
+        for d in sorted(ship_folder.iterdir(), key=lambda x: x.name.lower()):
+            if d.is_dir():
+                order_dirs.append(d)
+
+        if not order_dirs:
+            _emit(q, stage="error", pct=0, detail="", done=True,
+                  error="No order folders found inside the selected ship folder.")
+            return
+
+        _emit(q, stage="scan", pct=5,
+              detail=f"Found {len(order_dirs)} order folders.", done=False)
+
+        # --- Stage: prepare output folder ------------------------
+        output_dir = _output_folder_for(ship_folder)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        _emit(q, stage="prepare", pct=8,
+              detail=f"Output folder: {output_dir.name}", done=False)
+
+        # --- Stage: process orders -------------------------------
+        total_orders = len(order_dirs)
+        processed_count = 0
+        skipped_count = 0
+        pdf_count = 0
+        results: list[dict] = []
+
+        for oi, order_dir in enumerate(order_dirs):
+            folder_name = order_dir.name
+            variant = _detect_variant(folder_name)
+            order_id = _extract_order_id(folder_name)
+            special = _is_special(folder_name)
+            layout_key = _VARIANT_TO_LAYOUT[variant]
+            layout = LAYOUTS[layout_key]
+            ups = _UPS[variant]
+
+            # Check if already processed
+            if _pdf_already_exists(output_dir, order_id, folder_name, special):
+                skipped_count += 1
+                pct = 10 + int((oi + 1) / total_orders * 85)
+                _emit(q, stage="process", pct=pct,
+                      detail=f"Skipped (already exists): {folder_name}",
+                      done=False, order_index=oi, order_total=total_orders,
+                      order_name=folder_name, status="skipped")
+                results.append({
+                    "folder": folder_name, "variant": variant,
+                    "order_id": order_id or "", "status": "skipped",
+                    "pdfs": 0, "photos": 0,
+                })
+                continue
+
+            # Collect images
+            images = _collect_images(order_dir)
+            if not images:
+                skipped_count += 1
+                pct = 10 + int((oi + 1) / total_orders * 85)
+                _emit(q, stage="process", pct=pct,
+                      detail=f"Skipped (no images): {folder_name}",
+                      done=False, order_index=oi, order_total=total_orders,
+                      order_name=folder_name, status="empty")
+                results.append({
+                    "folder": folder_name, "variant": variant,
+                    "order_id": order_id or "", "status": "no images",
+                })
+                continue
+            num_photos = len(images)
+            num_pdfs = math.ceil(num_photos / ups)
+
+            _emit(q, stage="process", pct=10 + int(oi / total_orders * 85),
+                  detail=f"Processing: {folder_name} ({num_photos} photos, {num_pdfs} PDF{'s' if num_pdfs > 1 else ''})",
+                  done=False, order_index=oi, order_total=total_orders,
+                  order_name=folder_name, status="processing")
+
+            for pi in range(num_pdfs):
+                start_idx = pi * ups
+                end_idx = min(start_idx + ups, num_photos)
+                batch = images[start_idx:end_idx]
+
+                # Build label & filename
+                if num_pdfs == 1:
+                    label = folder_name
+                    pdf_filename = f"{folder_name}.pdf"
+                else:
+                    label = f"{folder_name}-({pi + 1}/{num_pdfs})"
+                    pdf_filename = f"{folder_name}-({pi + 1}_{num_pdfs}).pdf"
+
+                pdf_out = str(output_dir / pdf_filename)
+                generate_pdf(batch, pdf_out, label, layout)
+                pdf_count += 1
+
+                # Sub-progress within order
+                sub_pct = 10 + int(((oi + (pi + 1) / num_pdfs) / total_orders) * 85)
+                _emit(q, stage="process", pct=sub_pct,
+                      detail=f"{folder_name}: PDF {pi + 1}/{num_pdfs} done",
+                      done=False, order_index=oi, order_total=total_orders,
+                      order_name=folder_name, status="processing")
+
+            processed_count += 1
+            results.append({
+                "folder": folder_name, "variant": variant,
+                "order_id": order_id or "", "status": "done",
+                "pdfs": num_pdfs, "photos": num_photos,
+            })
+
+        # --- Stage: done -----------------------------------------
+        elapsed = round(time.perf_counter() - t0, 1)
+
+        log_activity("polaroid", "bulk_process", json.dumps({
+            "ship_folder": ship_folder_path,
+            "processed": processed_count,
+            "skipped": skipped_count,
+            "pdfs": pdf_count,
+            "elapsed": elapsed,
+        }))
+
+        _emit(q, stage="done", pct=100, done=True,
+              detail=f"Completed in {elapsed}s",
+              result={
+                  "orders": results,
+                  "processed": processed_count,
+                  "skipped": skipped_count,
+                  "total_pdfs": pdf_count,
+                  "output_folder": str(output_dir),
+                  "elapsed": elapsed,
+              })
+
+    except Exception as exc:
+        _emit(q, stage="error", pct=0, detail="", done=True,
+              error=str(exc))
+
+# --- Routes ------------------------------------------------------
+
+# --- Routes ------------------------------------------------------
+
+@polaroid_bp.route("/polaroid/base-folder", methods=["GET"])
+def get_base_folder():
+    folder = get_setting(SETTING_BASE_FOLDER, "")
+    return jsonify({"folder": folder})
+
+
+@polaroid_bp.route("/polaroid/base-folder", methods=["POST"])
+def set_base_folder():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+    if not folder:
+        return jsonify({"error": "Folder path is required."}), 400
+    p = Path(folder)
+    if not p.is_dir():
+        return jsonify({"error": f"Folder not found: {folder}"}), 400
+    set_setting(SETTING_BASE_FOLDER, str(p))
+    log_activity("polaroid", "set_base_folder", str(p))
+    return jsonify({"ok": True, "folder": str(p)})
+
+@polaroid_bp.route("/polaroid/ship-folders",methods=["GET"])
+def list_ship_folders():
+    base = get_setting(SETTING_BASE_FOLDER, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    folders = []
+    for d in sorted(Path(base).iterdir(), key=lambda x: x.name.lower()):
+        if d.is_dir() and _SHIP_FOLDER_RE.search(d.name):
+            # Count order sub-folders
+            order_count = sum(1 for sub in d.iterdir() if sub.is_dir())
+            folders.append({"name": d.name, "path": str(d), "order_count": order_count})
+
+    return jsonify({"folders": folders})
+
+
+@polaroid_bp.route("/polaroid/start", methods=["POST"])
+def start_processing():
+    data = request.get_json(silent=True) or {}
+    ship_folder = data.get("ship_folder", "").strip()
+    if not ship_folder:
+        return jsonify({"error": "ship_folder is required."}), 400
+
+    ship_folder = os.path.normpath(ship_folder)
+    if not Path(ship_folder).is_dir():
+        return jsonify({"error": f"Folder not found: {ship_folder}"}), 400
+
+    task_id = f"pol_{int(time.time() * 1000)}"
+    _new_q(task_id)
+
+    thread = threading.Thread(
+        target=_run_polaroid, args=(ship_folder, task_id), daemon=True,
+    )
+    thread.start()
+
+    return jsonify({"task_id": task_id})
+
+
+@polaroid_bp.route("/polaroid/progress/<task_id>")
+def polaroid_progress(task_id: str):
+    def generate():
+        q = _get_q(task_id)
+        if q is None:
+            yield f"data: {json.dumps({'error': 'Unknown task_id', 'done': True})}\n\n"
+            return
+        while True:
+            try:
+                msg = q.get(timeout=30)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(msg)}\n\n"
+            if msg.get("done"):
+                _del_q(task_id)
+                break
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no"})
+
+# --- Order Search (cancelled-order lookup) -----------------------
+
+# Pattern to match output folders (sibling of ship-image folders)
+_OUTPUT_FOLDER_RE = re.compile(r"ship.*output", re.IGNORECASE)
+
+@polaroid_bp.route("/polaroid/order-search", methods=["POST"])
+def order_search():
+    """Search the entire base folder for a 4-digit order ID in both
+    ship-image (order sub-folders) and ship-output (PDF filenames)."""
+    data = request.get_json(silent=True) or {}
+    order_id = data.get("order_id", "").strip()
+
+    if not re.fullmatch(r"\d{4}", order_id):
+        return jsonify({"error": "Please enter a valid 4-digit order ID."}), 400
+
+    base = get_setting(SETTING_BASE_FOLDER, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    base_path = Path(base)
+    results: list[dict] = []
+
+    for d in sorted(base_path.iterdir(), key=lambda x: x.name.lower()):
+        if not d.is_dir():
+            continue
+
+        is_image_folder = bool(_SHIP_FOLDER_RE.search(d.name))
+        is_output_folder = bool(_OUTPUT_FOLDER_RE.search(d.name))
+
+        if not is_image_folder and not is_output_folder:
+            continue
+
+        if is_image_folder:
+            # Search for order sub-folders containing the order ID
+            for sub in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+                if not sub.is_dir():
+                    continue
+                if order_id in sub.name:
+                    img_count = sum(
+                        1 for f in sub.iterdir()
+                        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+                    )
+                    variant = _detect_variant(sub.name)
+                    results.append({
+                        "ship_folder": d.name,
+                        "type": "input",
+                        "name": sub.name,
+                        "variant": variant,
+                        "photos": img_count,
+                        "path": str(sub),
+                    })
+
+        if is_output_folder:
+            # Search for PDFs containing the order ID in filename
+            for f in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+                if not f.is_file() or f.suffix.lower() != ".pdf":
+                    continue
+                if order_id in f.stem:
+                    results.append({
+                        "ship_folder": d.name,
+                        "type": "output",
+                        "name": f.name,
+                        "variant": _detect_variant(f.stem),
+                        "photos": None,
+                        "path": str(f),
+                    })
+
+    found_input = sum(1 for r in results if r["type"] == "input")
+    found_output = sum(1 for r in results if r["type"] == "output")
+
+    return jsonify({
+        "order_id": order_id,
+        "results": results,
+        "summary": {
+            "total": len(results),
+            "input_folders": found_input,
+            "output_pdfs": found_output,
+        },
+    })
