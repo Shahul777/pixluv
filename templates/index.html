@@ -2,375 +2,1111 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Basa - Print PDF Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Basa Post-Print Workflow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
-            background: #f0f2f5;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 40%, #24243e 100%);
             min-height: 100vh;
+            color: #e0e0e0;
         }
-        .header {
-            background: #1a1a2e;
-            color: #fff;
-            text-align: center;
-            padding: 18px 16px;
+        .navbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 32px;
+            background: rgba(255,255,255,0.04);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
-        .header h1 {
-            font-size: 22px;
-            font-weight: 600;
-            letter-spacing: 1px;
+        .brand {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: 3px;
+            background: linear-gradient(135deg, #a78bfa, #7c3aed);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .header p {
-            font-size: 12px;
-            color: #aaa;
-            margin-top: 4px;
-        }
-        .container {
-            max-width: 520px;
-            margin: 24px auto;
-            padding: 0 16px;
-        }
-        .card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        .nav-subtitle { font-size: .82rem; color: #8888aa; }
+        .container { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+        .alert {
+            padding: 14px 20px;
+            border-radius: 10px;
             margin-bottom: 16px;
+            font-size: .88rem;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn .3s ease;
         }
-        .step-label {
-            font-size: 12px;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-            font-weight: 600;
+        .alert.visible { display: flex; }
+        @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+        .alert-success { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+        .alert-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+        .alert-info   { background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
+        .alert-close {
+            margin-left: auto; background: none; border: none; color: inherit;
+            font-size: 1.1rem; cursor: pointer; opacity: .6;
         }
-        label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: #333;
-            margin-bottom: 6px;
+        .alert-close:hover { opacity: 1; }
+        .module-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 16px;
+            padding: 28px 28px 24px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            transition: border-color .3s, box-shadow .3s;
         }
-        select, input[type="text"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 15px;
-            background: #fafafa;
-            transition: border-color 0.2s;
-            -webkit-appearance: none;
+        .module-card:hover { border-color: rgba(124,58,237,0.25); box-shadow: 0 4px 30px rgba(124,58,237,0.08); }
+
+        .module-header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+        .step-circle {
+            width: 38px; height: 38px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: .95rem; color: #fff; flex-shrink: 0;
+            background: linear-gradient(135deg, #7c3aed, #a78bfa);
         }
-        select:focus, input[type="text"]:focus {
+        .step-circle.done { background: linear-gradient(135deg, #059669, #34d399); }
+        .module-title { font-size: 1.15rem; font-weight: 700; color: #f0f0f0; }
+        .status-pill {
+            display: inline-block; padding: 2px 10px; border-radius: 20px;
+            font-size: .68rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .5px; margin-left: 8px; vertical-align: middle;
+        }
+        .pill-done    { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .pill-pending { background: rgba(234,179,8,0.15); color: #fbbf24; }
+        .pill-running { background: rgba(96,165,250,0.15); color: #60a5fa; }
+
+        .module-desc { font-size: .83rem; color: #8888aa; margin: 8px 0 20px 52px; line-height: 1.55; }
+        .form-row { display: flex; gap: 12px; align-items: flex-end; }
+        .form-group { flex: 1; }
+        .form-group label {
+                        display: block; font-size: .78rem; font-weight: 600;
+            color: #aaa; margin-bottom: 6px; text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        .form-input {
+            width: 100%; padding: 10px 14px; border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.06);
+            color: #e8e8e8; font-size: .9rem;
+            transition: border-color .2s, box-shadow .2s;
             outline: none;
-            border-color: #1a1a2e;
         }
-        .info-text {
-            font-size: 13px;
-            color: #666;
-            margin-top: 6px;
-            font-style: italic;
-        }
-        .upload-area {
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 32px 16px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: #fafafa;
-            position: relative;
-        }
-        .upload-area:hover, .upload-area.dragover {
-                       border-color: #1a1a2e;
-            background: #f0f0ff;
-        }
-        .upload-area input[type="file"] {
-            position: absolute;
-            inset: 0;
-            opacity: 0;
-            cursor: pointer;
-        }
-        .upload-icon {
-            font-size: 40px;
-            margin-bottom: 8px;
-        }
-        .upload-text {
-            font-size: 14px;
-            color: #555;
-        }
-        .upload-text strong {
-            color: #1a1a2e;
-        }
-        .file-count {
-            margin-top: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #1a1a2e;
-        }
-        .file-count.error {
-            color: #d32f2f;
-        }
+        .form-input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.2); }
+        .form-input:disabled { opacity: .4; cursor: not-allowed; }
+        .form-input::placeholder { color: #555; }
+
         .btn {
-            display: block;
-            width: 100%;
-            padding: 14px;
-            background: #1a1a2e;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
+            padding: 10px 28px; border-radius: 10px; border: none;
+            font-size: .88rem; font-weight: 600; cursor: pointer;
+            transition: all .2s; white-space: nowrap; text-decoration: none;
+            display: inline-flex; align-items: center; gap: 6px;
         }
-        .btn:hover { background: #2a2a4e; }
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            color: #fff; box-shadow: 0 4px 14px rgba(124,58,237,0.3);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,58,237,0.4); }
+        .btn-success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: #fff; box-shadow: 0 4px 14px rgba(16,185,129,0.3);
+        }
+        .btn-success:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
         .btn:disabled {
-            background: #999;
-            cursor: not-allowed;
+            background: rgba(255,255,255,0.06); color: #555; cursor: not-allowed;
+            box-shadow: none; transform: none;
         }
-        .progress-wrap {
-            display: none;
-            margin-top: 16px;
+        .progress-section { display: none; margin-top: 22px; }
+        .progress-section.visible { display: block; }
+
+        .progress-bar-wrap {
+            width: 100%; height: 28px; border-radius: 14px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            overflow: hidden; position: relative;
         }
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background: #1a1a2e;
+        .progress-bar-fill {
+            height: 100%; border-radius: 14px;
+            background: linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed);
+            background-size: 200% 100%;
+            animation: shimmer 2s linear infinite;
+            transition: width .4s ease;
             width: 0%;
-            transition: width 0.3s;
-            border-radius: 3px;
         }
-        .status-text {
-            font-size: 13px;
-            color: #666;
-            text-align: center;
-            margin-top: 8px;
+        .progress-bar-fill.done {
+            background: linear-gradient(90deg, #059669, #34d399);
+            animation: none;
         }
-        .error-msg {
-            background: #ffeaea;
-            color: #d32f2f;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-top: 12px;
-            display: none;
+        .progress-bar-fill.error {
+            background: linear-gradient(90deg, #dc2626, #f87171);
+            animation: none;
         }
-        .success-msg {
-            background: #e8f5e9;
-            color: #2e7d32;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-top: 12px;
-                        display: none;
-            text-align: center;
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        .progress-pct {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: .78rem; font-weight: 700; color: #fff;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+
+        .progress-meta {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 10px; font-size: .8rem; color: #999;
+        }
+        .progress-stage {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .stage-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #7c3aed; animation: pulse 1s ease infinite;
+        }
+        .stage-dot.done { background: #34d399; animation: none; }
+        .stage-dot.error { background: #f87171; animation: none; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .progress-detail {
+            margin-top: 8px; font-size: .78rem; color: #777;
+            min-height: 1.2em;
+        }
+        .stage-timeline {
+            display: flex; gap: 6px; margin-top: 16px; flex-wrap: wrap;
+        }
+                .stage-chip {
+            padding: 4px 12px; border-radius: 20px; font-size: .7rem;
+            font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+            background: rgba(255,255,255,0.05); color: #666;
+            border: 1px solid rgba(255,255,255,0.06);
+            transition: all .3s;
+        }
+        .stage-chip.active {
+            background: rgba(124,58,237,0.15); color: #a78bfa;
+            border-color: rgba(124,58,237,0.3);
+        }
+        .stage-chip.completed {
+            background: rgba(34,197,94,0.12); color: #4ade80;
+            border-color: rgba(34,197,94,0.25);
+        }
+        .stage-chip.errored {
+            background: rgba(239,68,68,0.12); color: #f87171;
+            border-color: rgba(239,68,68,0.25);
+        }
+
+        .table-section { display: none; margin-top: 22px; }
+        .table-section.visible { display: block; }
+        .table-wrap {
+            margin-top: 10px; margin-left: 0;
+            max-height: 350px; overflow-y: auto;
+            border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
+        }
+        .table-wrap::-webkit-scrollbar { width: 6px; }
+        .table-wrap::-webkit-scrollbar-track { background: transparent; }
+        .table-wrap::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 3px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        thead th {
+            position: sticky; top: 0;
+            background: rgba(124,58,237,0.15); backdrop-filter: blur(8px);
+            padding: 10px 14px; text-align: left; font-weight: 600;
+            color: #c4b5fd; font-size: .75rem; text-transform: uppercase;
+            letter-spacing: .5px; border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        tbody td {
+            padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+            color: #ccc;
+        }
+        tbody tr:hover { background: rgba(124,58,237,0.06); }
+
+        .tag {
+            display: inline-block; padding: 2px 8px; border-radius: 6px;
+            font-size: .72rem; font-weight: 600;
+        }
+        .tag-id { background: rgba(96,165,250,0.15); color: #60a5fa; }
+        .tag-variant { background: rgba(168,85,247,0.15); color: #c084fc; }
+        .code-name { font-family: 'Cascadia Code', 'Fira Code', monospace; color: #a78bfa; font-size: .8rem; }
+
+        .table-title {
+            font-size: .88rem; font-weight: 600; color: #d4d4d4;
+            margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+        }
+        .count-badge {
+            background: rgba(124,58,237,0.2); color: #a78bfa; padding: 2px 10px;
+            border-radius: 20px; font-size: .72rem; font-weight: 700;
+        }
+
+        .summary-card {
+            display: none; margin-top: 18px; padding: 18px 22px;
+            border-radius: 12px;
+            background: rgba(34,197,94,0.06);
+            border: 1px solid rgba(34,197,94,0.2);
+        }
+        .summary-card.visible { display: block; }
+        .summary-card h4 { font-size: .9rem; color: #4ade80; margin-bottom: 10px; }
+        .summary-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;
+        }
+        .summary-item { font-size: .82rem; color: #bbb; }
+        .summary-item span { color: #e0e0e0; font-weight: 600; }
+
+        .btn-outline {
+            background: rgba(255,255,255,0.06);
+            color: #a78bfa;
+            border: 1px solid rgba(124,58,237,0.3);
+        }
+        .btn-outline:hover { background: rgba(124,58,237,0.15); }
+        .btn-outline:disabled { opacity: .3; cursor: not-allowed; background: rgba(255,255,255,0.03); }
+
+        .preview-container {
+            max-height: 70vh; overflow-y: auto; border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.25); padding: 16px;
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+        }
+        .preview-container::-webkit-scrollbar { width: 6px; }
+        .preview-container::-webkit-scrollbar-track { background: transparent; }
+        
+                .preview-container::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 3px; }
+        .preview-container img {
+            max-width: 100%; border-radius: 6px;
+            box-shadow: 0 2px 14px rgba(0,0,0,0.5);
+        }
+        .pdf-nav {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px; gap: 12px;
+        }
+        .pdf-nav-label {
+            font-size: .84rem; font-weight: 600; color: #c4b5fd;
+            text-align: center; flex: 1; line-height: 1.4;
+        }
+        .pdf-nav-label small { display: block; font-size: .72rem; color: #888; font-weight: 400; }
+         .match-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+        .match-item {
+            display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+            border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+            background: rgba(255,255,255,0.03); cursor: pointer;
+            transition: all .2s;
+        }
+        .match-item:hover { border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.06); }
+        .match-item.active { border-color: rgba(124,58,237,0.5); background: rgba(124,58,237,0.1); }
+        .match-filename { flex: 1; font-size: .84rem; color: #ccc; font-weight: 500; }
+        .match-filename small { display: block; font-size: .72rem; color: #777; font-weight: 400; }
+        .similarity-badge {
+            padding: 4px 12px; border-radius: 20px; font-size: .72rem; font-weight: 700;
+            min-width: 56px; text-align: center;
+        }
+
+        .sim-high { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .sim-medium { background: rgba(234,179,8,0.15); color: #fbbf24; }
+        .sim-low { background: rgba(239,68,68,0.12); color: #f87171; }
+        .m4-spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid rgba(167,139,250,0.3); border-top-color: #a78bfa;
+            border-radius: 50%; animation: m4spin .6s linear infinite;
+        }
+        @keyframes m4spin { to { transform: rotate(360deg); } }
+        
+        
+        
+        .footer { text-align: center; font-size: .75rem; color: #555; padding: 20px 0; }
+        @media (max-width: 640px) {
+            .navbar { padding: 12px 16px; }
+            .container { padding: 16px 12px 40px; }
+            .module-card { padding: 20px 16px; }
+            .form-row { flex-direction: column; }
+            .module-desc { margin-left: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>BASA &bull; Pre-Print Workflow</h1>
-        <p>Upload photos &rarr; Get print-ready CMYK PDF</p>
+
+<nav class="navbar">
+    <div style="display:flex;align-items:center;gap:16px;">
+        <span class="brand">BASA</span>
+        <span class="nav-subtitle">Post-Print Workflow</span>
+    </div>
+</nav>
+
+<div class="container">
+
+    <div id="m1Alert" class="alert">
+        <span id="m1AlertText"></span>
+        <button class="alert-close" onclick="this.parentElement.classList.remove('visible')">&times;</button>
     </div>
 
-    <div class="container">
-        <form id="pdfForm" enctype="multipart/form-data">
+    <div class="module-card" id="m1Card">
+        <div class="module-header">
+            <div class="step-circle" id="m1Circle">1</div>
+            <span class="module-title">
+                Print PDF Sorting &amp; Packaging
+                <span class="status-pill pill-pending" id="m1Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Enter the folder path containing your print PDFs. Files with "combined" in the name are
+            <strong>deleted first</strong>. Remaining PDFs are sorted by
+            <strong>Variant &rarr; Complexity &rarr; Name</strong>, renamed with a numeric prefix,
+            combined into a single lossless PDF, and zipped.
+        </p>
 
-            <div class="card">
-                <div class="step-label">Step 1 &mdash; Choose Layout</div>
-                <label for="layout">Layout</label>
-                <select id="layout" name="layout">
-                    {% for key, val in layouts.items() %}
-                    <option value="{{ key }}" data-max="{{ val.max_images }}">{{ val.label }}</option>
-                    {% endfor %}
-                </select>
-                <div class="info-text" id="maxInfo">Max 18 photos for this layout</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="folder_path">Folder Path</label>
+                <input
+                    class="form-input"
+                    id="folder_path"
+                    placeholder="C:\Users\you\Desktop\PrintPDFs"
+                >
+            </div>
+            <div>
+                <button id="m1RunBtn" class="btn btn-primary" onclick="startModule1()">&#9654; Run</button>
+            </div>
+        </div>
+
+        <div class="progress-section" id="m1Progress">
+            <div class="stage-timeline" id="m1Stages">
+                <span class="stage-chip" data-stage="cleanup">Cleanup</span>
+                <span class="stage-chip" data-stage="scan">Scan</span>
+                <span class="stage-chip" data-stage="sort">Sort</span>
+                <span class="stage-chip" data-stage="rename">Rename</span>
+                <span class="stage-chip" data-stage="combine">Combine</span>
+                <span class="stage-chip" data-stage="zip">Zip</span>
+                <span class="stage-chip" data-stage="report">Report</span>
+                <span class="stage-chip" data-stage="done">Done</span>
             </div>
 
-            <div class="card">
-                <div class="step-label">Step 2 &mdash; Order Name</div>
-                <label for="orderName">Order / Folder Name</label>
-                <input type="text" id="orderName" name="order_name" placeholder="e.g. ORD-20260422">
-            </div>
-
-            <div class="card">
-                <div class="step-label">Step 3 &mdash; Upload Photos</div>
-                <div class="upload-area" id="uploadArea">
-                    <input type="file" name="images" id="imageInput" multiple
-                        accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.heic,.heif">
-                    <div class="upload-icon">📷</div>
-                    <div class="upload-text">
-                        <strong>Tap to select photos</strong><br>
-                        or drag &amp; drop here
-                    </div>
+            <div style="margin-top:14px;">
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" id="m1Bar"></div>
+                    <div class="progress-pct" id="m1Pct">0%</div>
                 </div>
-                <div class="file-count" id="fileCount"></div>
             </div>
 
-            <button type="submit" class="btn" id="submitBtn">Generate CMYK Print PDF</button>
-
-            <div class="progress-wrap" id="progressWrap">
-                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-                <div class="status-text" id="statusText">Processing...</div>
+            <div class="progress-meta">
+                            <div class="progress-stage">
+                <div class="stage-dot" id="m1Dot"></div>
+                <span id="m1StageLabel">Starting...</span>
             </div>
+            <span id="m1Eta"></span>
+        </div>
 
-            <div class="error-msg" id="errorMsg"></div>
-            <div class="success-msg" id="successMsg"></div>
-        </form>
+        <div class="progress-detail" id="m1Detail"></div>
+        </div>
+
+        <div class="summary-card" id="m1Summary">
+            <h4>&#10003; Completed</h4>
+            <div class="summary-grid">
+                <div class="summary-item">PDFs combined: <span id="sumTotal">-</span></div>
+                <div class="summary-item">Unique Order IDs: <span id="sumIds">-</span></div>
+                <div class="summary-item">Time: <span id="sumTime">-</span></div>
+                <div class="summary-item">Combined PDF: <span id="sumPdf">-</span></div>
+                <div class="summary-item">ZIP file: <span id="sumZip">-</span></div>
+            </div>
+        </div>
+
+        <div class="table-section" id="m1Table">
+            <div class="table-title">
+                Sorted &amp; Renamed Files
+                <span class="count-badge" id="m1Count">0</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>New Name</th>
+                            <th>Original</th>
+                            <th>Order ID</th>
+                            <th>Variant</th>
+                        </tr>
+                    </thead>
+                    <tbody id="m1Tbody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
-    <script>
-        const layoutSelect = document.getElementById('layout');
-        const maxInfo = document.getElementById('maxInfo');
-        const imageInput = document.getElementById('imageInput');
-        const fileCount = document.getElementById('fileCount');
-        const uploadArea = document.getElementById('uploadArea');
-        const form = document.getElementById('pdfForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const progressWrap = document.getElementById('progressWrap');
-        const progressFill = document.getElementById('progressFill');
-        const statusText = document.getElementById('statusText');
-        const errorMsg = document.getElementById('errorMsg');
-        const successMsg = document.getElementById('successMsg');
+    <div class="module-card" id="m2Card">
+        <div class="module-header">
+            <div class="step-circle" id="m2Circle">2</div>
+            <span class="module-title">
+                Shipping Label Generator
+                <span class="status-pill pill-pending" id="m2Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Upload one or more Amazon shipping-label PDFs. The tool
+            <strong>discards invoices</strong> (right halves), packs the
+            <strong>shipping labels side-by-side</strong> on new A4 pages, and
+            stamps a <strong>sequential number</strong> on every label.
+        </p>
 
-        function getMaxImages() {
-            return parseInt(layoutSelect.selectedOptions[0].dataset.max);
+        <form id="m2Form" enctype="multipart/form-data">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="m2Files">PDF Files</label>
+                    <input
+                        type="file"
+                        class="form-input"
+                        id="m2Files"
+                        name="pdfs"
+                        accept=".pdf"
+                        multiple
+                    >
+                </div>
+                <div>
+                    <button type="submit" id="m2RunBtn" class="btn btn-primary">&#9654; Generate</button>
+                </div>
+            </div>
+        </form>
+
+        <div id="m2Status" style="margin-top:14px; display:none;">
+            <span id="m2StatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+        </div>
+    </div>
+
+    <div class="module-card" id="m3Card">
+        <div class="module-header">
+            <div class="step-circle" id="m3Circle">3</div>
+            <span class="module-title">
+                Order PDF Preview
+                <span class="status-pill pill-pending" id="m3Pill">Ready</span>
+            </span>
+        </div>
+                <p class="module-desc">
+            Enter the folder path containing order PDFs and a <strong>4-digit order ID</strong>.
+            Instantly preview the content of matching PDFs without opening them.
+            If multiple PDFs share the same order ID, use <strong>Prev / Next</strong> to browse.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="m3Folder">Folder Path</label>
+                <input type="text" class="form-input" id="m3Folder" placeholder="C:\Users\you\Desktop\Orders">
+            </div>
+            <div class="form-group" style="max-width:140px;">
+                <label for="m3OrderId">Order ID</label>
+                <input type="text" class="form-input" id="m3OrderId" placeholder="1234" maxlength="4">
+            </div>
+            <div>
+                <button id="m3SearchBtn" class="btn btn-primary">&#128269; Search</button>
+            </div>
+        </div>
+
+        <div id="m3Preview" style="display:none; margin-top:22px;">
+            <div class="pdf-nav" id="m3PdfNav">
+                <button class="btn btn-outline" id="m3PrevPdf">&larr; Prev</button>
+                <div class="pdf-nav-label" id="m3PdfLabel"></div>
+                <button class="btn btn-outline" id="m3NextPdf">Next &rarr;</button>
+            </div>
+            <div class="preview-container" id="m3Pages"></div>
+        </div>
+
+        <div id="m3Status" style="margin-top:14px; display:none;">
+            <span id="m3StatusText" style="font-size:.84rem;"></span>
+        </div>
+    </div>
+<div class="module-card" id="m4Card">
+        <div class="module-header">
+            <div class="step-circle" id="m4Circle">4</div>
+            <span class="module-title">
+                Find PDF by Image
+                <span class="status-pill pill-pending" id="m4Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Upload an image and a folder path containing PDFs. The tool scans every PDF
+            for matching images using <strong>perceptual hashing</strong> &mdash; works even with
+            camera photos of the original print. Click a result to preview.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="m4Folder">Folder Path</label>
+                <input type="text" class="form-input" id="m4Folder" placeholder="C:\Users\you\Desktop\Orders">
+            </div>
+            <div class="form-group" style="max-width:220px;">
+                <label for="m4Image">Image</label>
+                <input type="file" class="form-input" id="m4Image" accept="image/*">
+            </div>
+            <div>
+                <button id="m4SearchBtn" class="btn btn-primary">&#128269; Find</button>
+            </div>
+        </div>
+
+        <div id="m4Results" style="display:none; margin-top:22px;">
+            <div class="table-title">
+                Matching PDFs
+                <span class="count-badge" id="m4Count">0</span>
+            </div>
+            <div class="match-list" id="m4MatchList"></div>
+            <div id="m4Preview" style="display:none; margin-top:16px;">
+                <div class="pdf-nav-label" id="m4PdfLabel" style="margin-bottom:12px;"></div>
+                <div class="preview-container" id="m4Pages"></div>
+            </div>
+        </div>
+
+        <div id="m4Status" style="margin-top:14px; display:none;">
+            <span id="m4StatusText" style="font-size:.84rem;"></span>
+        </div>
+    </div>
+    <p class="footer">Basa Workflow Tools &middot; Flask + PyMuPDF &middot; Local use only</p>
+</div>
+
+<script>
+(function () {
+    const STAGE_ORDER = ['cleanup','scan','sort','rename','combine','zip','report','done'];
+
+    const $input     = document.getElementById('folder_path');
+    const $btn       = document.getElementById('m1RunBtn');
+    const $circle    = document.getElementById('m1Circle');
+    const $pill      = document.getElementById('m1Pill');
+    const $progress  = document.getElementById('m1Progress');
+    const $bar       = document.getElementById('m1Bar');
+    const $pct       = document.getElementById('m1Pct');
+    const $dot       = document.getElementById('m1Dot');
+    const $stage     = document.getElementById('m1StageLabel');
+    const $eta       = document.getElementById('m1Eta');
+    const $detail    = document.getElementById('m1Detail');
+    const $summary   = document.getElementById('m1Summary');
+    const $table     = document.getElementById('m1Table');
+    const $tbody     = document.getElementById('m1Tbody');
+    const $count     = document.getElementById('m1Count');
+    const $alert     = document.getElementById('m1Alert');
+    const $alertTx   = document.getElementById('m1AlertText');
+
+    let completedStages = new Set();
+
+    function showAlert(type, msg) {
+        $alert.className = 'alert alert-' + type + ' visible';
+        $alertTx.textContent = msg;
+    }
+
+    function setStageChip(stageName, state) {
+        const chips = document.querySelectorAll('#m1Stages .stage-chip');
+        chips.forEach(c => {
+            if (c.dataset.stage === stageName) {
+                c.classList.remove('active', 'completed', 'errored');
+                c.classList.add(state);
+            }
+        });
+    }
+
+    function markPriorStagesCompleted(currentStage) {
+        const idx = STAGE_ORDER.indexOf(currentStage);
+        for (let i = 0; i < idx; i++) {
+            if (!completedStages.has(STAGE_ORDER[i])) {
+                completedStages.add(STAGE_ORDER[i]);
+                setStageChip(STAGE_ORDER[i], 'completed');
+            }
+        }
+    }
+
+    function formatEta(sec) {
+        if (sec == null || sec <= 0) return '';
+        if (sec < 60) return '~' + Math.ceil(sec) + 's remaining';
+        const m = Math.floor(sec / 60);
+                const s = Math.ceil(sec % 60);
+        return '~' + m + 'm ' + s + 's remaining';
+    }
+
+    function resetUI() {
+        $progress.classList.remove('visible');
+        $summary.classList.remove('visible');
+        $table.classList.remove('visible');
+        $bar.style.width = '0%';
+        $bar.classList.remove('done', 'error');
+        $pct.textContent = '0%';
+        $dot.classList.remove('done', 'error');
+        $stage.textContent = 'Starting...';
+        $eta.textContent = '';
+        $detail.textContent = '';
+        $tbody.innerHTML = '';
+        $count.textContent = '0';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        $alert.classList.remove('visible');
+        completedStages = new Set();
+        document.querySelectorAll('#m1Stages .stage-chip').forEach(c => {
+            c.classList.remove('active', 'completed', 'errored');
+        });
+    }
+
+    window.startModule1 = function () {
+        const folder = $input.value.trim();
+        if (!folder) {
+            showAlert('danger', 'Please enter a folder path.');
+            return;
         }
 
-        layoutSelect.addEventListener('change', () => {
-            maxInfo.textContent = `Max ${getMaxImages()} photos for this layout`;
-            validateFileCount();
-        });
+        resetUI();
+        $btn.disabled = true;
+        $input.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+        $progress.classList.add('visible');
 
-        imageInput.addEventListener('change', validateFileCount);
-
-        function validateFileCount() {
-            const max = getMaxImages();
-            const count = imageInput.files.length;
-            if (count === 0) {
-                fileCount.textContent = '';
-                fileCount.className = 'file-count';
+        fetch('/module1/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_path: folder }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                showAlert('danger', data.error);
+                $btn.disabled = false;
+                $input.disabled = false;
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
                 return;
             }
-            if (count > max) {
-                fileCount.textContent = `${count} files selected &mdash; exceeds max ${max}!`;
-                fileCount.className = 'file-count error';
-            } else {
-                fileCount.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
-                fileCount.className = 'file-count';
+            subscribeSSE(data.task_id);
+        })
+        .catch(err => {
+            showAlert('danger', 'Request failed: ' + err.message);
+            $btn.disabled = false;
+            $input.disabled = false;
+        });
+    };
+
+    function subscribeSSE(taskId) {
+        const es = new EventSource('/module1/progress/' + encodeURIComponent(taskId));
+
+        es.onmessage = function (ev) {
+            const d = JSON.parse(ev.data);
+
+            if (d.error) {
+                es.close();
+                $bar.style.width = '100%';
+                $bar.classList.add('error');
+                $pct.textContent = 'Error';
+                $dot.classList.add('error');
+                $stage.textContent = 'Failed';
+                $detail.textContent = d.error;
+                $eta.textContent = '';
+                setStageChip(d.stage || 'error', 'errored');
+                $pill.className = 'status-pill';
+                $pill.style.background = 'rgba(239,68,68,0.15)';
+                $pill.style.color = '#f87171';
+                $pill.textContent = 'Error';
+                $btn.disabled = false;
+                $input.disabled = false;
+                return;
             }
+                        const pct = Math.min(d.pct, 100);
+            $bar.style.width = pct + '%';
+            $pct.textContent = pct + '%';
+            $stage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+            $detail.textContent = d.detail || '';
+            $eta.textContent = formatEta(d.eta_sec);
+
+            markPriorStagesCompleted(d.stage);
+            if (!d.done) {
+                setStageChip(d.stage, 'active');
+            }
+
+            if (d.done) {
+                es.close();
+                completedStages.add(d.stage);
+                STAGE_ORDER.forEach(s => setStageChip(s, 'completed'));
+                $bar.classList.add('done');
+                $dot.classList.add('done');
+                $circle.classList.add('done');
+                $pill.className = 'status-pill pill-done';
+                $pill.innerHTML = '&#10003; Done';
+                $eta.textContent = '';
+
+                if (d.result) {
+                    const r = d.result;
+                    document.getElementById('sumTotal').textContent = r.total;
+                    document.getElementById('sumIds').textContent = r.unique_ids || '-';
+                    document.getElementById('sumTime').textContent = r.elapsed + 's';
+                    document.getElementById('sumPdf').textContent = r.combined_pdf;
+                    document.getElementById('sumZip').textContent = r.zip_file;
+                    $summary.classList.add('visible');
+
+                    if (r.sorted_list && r.sorted_list.length) {
+                        $count.textContent = r.sorted_list.length;
+                        $tbody.innerHTML = r.sorted_list.map((item, i) =>
+                            '<tr>' +
+                                '<td>' + (i + 1) + '</td>' +
+                                '<td><span class="code-name">' + escHtml(item.new_name) + '</span></td>' +
+                                '<td>' + escHtml(item.original) + '</td>' +
+                                '<td><span class="tag tag-id">' + (item.four_digit_id || '-') + '</span></td>' +
+                                '<td><span class="tag tag-variant">' + escHtml(item.variant) + '</span></td>' +
+                            '</tr>'
+                        ).join('');
+                        $table.classList.add('visible');
+                    }
+                }
+
+                $btn.disabled = false;
+                $input.disabled = false;
+            }
+        };
+
+        es.onerror = function () {
+            es.close();
+            $stage.textContent = 'Connection lost';
+            $dot.classList.add('error');
+            $btn.disabled = false;
+            $input.disabled = false;
+        };
+    }
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    $input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); startModule1(); }
+    });
+})();
+
+(function () {
+    const $form      = document.getElementById('m2Form');
+    const $files     = document.getElementById('m2Files');
+    const $btn       = document.getElementById('m2RunBtn');
+    const $pill      = document.getElementById('m2Pill');
+    const $circle    = document.getElementById('m2Circle');
+    const $status    = document.getElementById('m2Status');
+    const $statusTx  = document.getElementById('m2StatusText');
+
+    $form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!$files.files.length) {
+            $statusTx.textContent = 'Please select at least one PDF file.';
+            $statusTx.style.color = '#f87171';
+            $status.style.display = 'block';
+            return;
         }
+                $btn.disabled = true;
+        $files.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Processing';
+        $statusTx.textContent = 'Uploading & processing...';
+        $statusTx.style.color = '#60a5fa';
+        $status.style.display = 'block';
 
-        ['dragover', 'dragenter'].forEach(e => {
-            uploadArea.addEventListener(e, (ev) => {
-                ev.preventDefault();
-                uploadArea.classList.add('dragover');
-            });
+        const fd = new FormData();
+        for (const f of $files.files) fd.append('pdfs', f);
+
+        fetch('/shipping-labels', { method: 'POST', body: fd })
+        .then(function (resp) {
+            if (!resp.ok) return resp.json().then(function (j) { throw new Error(j.error || 'Server error'); });
+            return resp.blob();
+        })
+        .then(function (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'optimized_shipping_labels.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; Done';
+            $circle.classList.add('done');
+            $statusTx.textContent = 'Download started!';
+            $statusTx.style.color = '#4ade80';
+        })
+        .catch(function (err) {
+            $pill.className = 'status-pill';
+            $pill.style.background = 'rgba(239,68,68,0.15)';
+            $pill.style.color = '#f87171';
+            $pill.textContent = 'Error';
+            $statusTx.textContent = err.message;
+            $statusTx.style.color = '#f87171';
+        })
+        .finally(function () {
+            $btn.disabled = false;
+            $files.disabled = false;
         });
-        ['dragleave', 'drop'].forEach(e => {
-            uploadArea.addEventListener(e, () => uploadArea.classList.remove('dragover'));
-        });
+    });
+})();
+</script>
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            errorMsg.style.display = 'none';
-            successMsg.style.display = 'none';
+<script>
+(function () {
+    let m3State = null; // { search_id, matches, currentIdx }
 
-            const max = getMaxImages();
-            const count = imageInput.files.length;
+    const $folder    = document.getElementById('m3Folder');
+    const $orderId   = document.getElementById('m3OrderId');
+    const $btn       = document.getElementById('m3SearchBtn');
+    const $pill      = document.getElementById('m3Pill');
+    const $circle    = document.getElementById('m3Circle');
+    const $preview   = document.getElementById('m3Preview');
+    const $pdfNav    = document.getElementById('m3PdfNav');
+    const $pdfLabel  = document.getElementById('m3PdfLabel');
+    const $pages     = document.getElementById('m3Pages');
+    const $prevBtn   = document.getElementById('m3PrevPdf');
+    const $nextBtn   = document.getElementById('m3NextPdf');
+    const $status    = document.getElementById('m3Status');
+    const $statusTx  = document.getElementById('m3StatusText');
 
-            if (count === 0) {
-                showError('Please select at least one photo.');
+    function showStatus(msg, color) {
+        $statusTx.textContent = msg;
+        $statusTx.style.color = color;
+        $status.style.display = 'block';
+    }
+
+    function resetM3() {
+        $preview.style.display = 'none';
+        $status.style.display = 'none';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        m3State = null;
+    }
+
+    function doSearch() {
+        const folder = $folder.value.trim();
+        const orderId = $orderId.value.trim();
+
+        if (!folder) { showStatus('Please enter a folder path.', '#f87171'); return; }
+        if (!/^\d{4}$/.test(orderId)) { showStatus('Order ID must be exactly 4 digits.', '#f87171'); return; }
+
+        resetM3();
+        $btn.disabled = true;
+                $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Searching';
+
+        fetch('/module3/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_path: folder, order_id: orderId }),
+        })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
+        .then(function (res) {
+            if (!res.ok || res.data.error) {
+                showStatus(res.data.error || 'Search failed.', '#f87171');
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
                 return;
             }
-            if (count > max) {
-                showError(`Too many photos! This layout supports max ${max}, you selected ${count}.`);
+
+            m3State = { search_id: res.data.search_id, matches: res.data.matches, currentIdx: 0 };
+
+            var n = res.data.matches.length;
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; ' + n + ' PDF' + (n > 1 ? 's' : '') + ' found';
+            $circle.classList.add('done');
+
+            renderCurrentPdf();
+            $preview.style.display = 'block';
+        })
+        .catch(function (err) {
+            showStatus('Request failed: ' + err.message, '#f87171');
+            $pill.className = 'status-pill pill-pending';
+            $pill.textContent = 'Ready';
+        })
+        .finally(function () { $btn.disabled = false; });
+    }
+
+    function renderCurrentPdf() {
+        if (!m3State) return;
+        var s = m3State, match = s.matches[s.currentIdx];
+
+        $pdfNav.style.display = s.matches.length > 1 ? 'flex' : 'none';
+        $pdfLabel.innerHTML =
+            escHtml3(match.filename) +
+            '<small>' + match.page_count + ' page' + (match.page_count > 1 ? 's' : '') +
+            (s.matches.length > 1 ? '&nbsp;|&nbsp; PDF ' + (s.currentIdx + 1) + ' of ' + s.matches.length : '') +
+            '</small>';
+
+        $prevBtn.disabled = s.currentIdx === 0;
+        $nextBtn.disabled = s.currentIdx === s.matches.length - 1;
+
+        $pages.innerHTML = '';
+        for (var p = 0; p < match.page_count; p++) {
+            var img = document.createElement('img');
+            img.src = '/module3/page/' + s.search_id + '/' + s.currentIdx + '/' + p;
+            img.alt = 'Page ' + (p + 1);
+            if (p > 0) img.loading = 'lazy';
+            $pages.appendChild(img);
+        }
+    }
+
+    function changePdf(dir) {
+        if (!m3State) return;
+        var idx = m3State.currentIdx + dir;
+        if (idx < 0 || idx >= m3State.matches.length) return;
+        m3State.currentIdx = idx;
+        renderCurrentPdf();
+        $pages.scrollTop = 0;
+    }
+
+    function escHtml3(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    $btn.addEventListener('click', doSearch);
+    $prevBtn.addEventListener('click', function () { changePdf(-1); });
+    $nextBtn.addEventListener('click', function () { changePdf(1); });
+    $orderId.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+    $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+
+    $orderId.addEventListener('input', function () {
+        this.value = this.value.replace(/[^0-9]/g, '');
+    });
+})();
+</script>
+
+<script>
+(function () {
+    let m4State = null;
+
+    const $folder = document.getElementById('m4Folder');
+    const $image = document.getElementById('m4Image');
+    const $btn = document.getElementById('m4SearchBtn');
+    const $pill = document.getElementById('m4Pill');
+    const $circle = document.getElementById('m4Circle');
+    const $results = document.getElementById('m4Results');
+    const $count = document.getElementById('m4Count');
+    const $matchList = document.getElementById('m4MatchList');
+    const $preview = document.getElementById('m4Preview');
+    const $pdfLabel = document.getElementById('m4PdfLabel');
+    const $pages = document.getElementById('m4Pages');
+    const $status = document.getElementById('m4Status');
+    const $statusTx = document.getElementById('m4StatusText');
+
+    function showStatus(msg, color) {
+        $statusTx.innerHTML = msg;
+        $statusTx.style.color = color;
+        $status.style.display = 'block';
+    }
+
+    function resetM4() {
+        $results.style.display = 'none';
+        $preview.style.display = 'none';
+        $status.style.display = 'none';
+        $matchList.innerHTML = '';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        m4State = null;
+    }
+
+    function simClass(s) {
+        if (s >= 90) return 'sim-high';
+        if (s >= 80) return 'sim-medium';
+        return 'sim-low';
+    }
+
+    function escH(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function doFind() {
+        var folder = $folder.value.trim();
+        if (!folder) { showStatus('Please enter a folder path.', '#f87171'); return; }
+        if (!$image.files.length) { showStatus('Please select an image file.', '#f87171'); return; }
+
+        resetM4();
+        $btn.disabled = true;
+        $image.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '<span class="m4-spinner"></span> Scanning';
+        showStatus('Scanning PDFs for matching images...', '#60a5fa');
+
+        var fd = new FormData();
+        fd.append('folder_path', folder);
+        fd.append('image', $image.files[0]);
+
+        fetch('/module4/search', { method: 'POST', body: fd })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
+        .then(function (res) {
+            if (!res.ok || res.data.error) {
+                showStatus(res.data.error || 'Search failed.', '#f87171');
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
                 return;
             }
 
-            submitBtn.disabled = true;
-            progressWrap.style.display = 'block';
-            progressFill.style.width = '0%';
-            statusText.textContent = 'Uploading & processing...';
+            m4State = { search_id: res.data.search_id, matches: res.data.matches };
+            var n = res.data.matches.length;
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; ' + n + ' match' + (n > 1 ? 'es' : '');
+            $circle.classList.add('done');
+            $count.textContent = n;
+            $status.style.display = 'none';
 
-            const formData = new FormData(form);
-
-            try {
-                progressFill.style.width = '30%';
-                statusText.textContent = 'Uploading photos...';
-
-                const resp = await fetch('/generate', {
-                    method: 'POST',
-                    body: formData
+            $matchList.innerHTML = res.data.matches.map(function (m, i) {
+                return '<div class="match-item" data-idx="' + i + '">' +
+                    '<span class="match-filename">' + escH(m.filename) +
+                    '<small>' + m.page_count + ' page' + (m.page_count > 1 ? 's' : '') + '</small></span>' +
+                    '<span class="similarity-badge ' + simClass(m.similarity) + '">' + m.similarity + '%</span>' +
+                    '</div>';
+            }).join('');
+            $matchList.querySelectorAll('.match-item').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    var idx = parseInt(this.dataset.idx);
+                    $matchList.querySelectorAll('.match-item').forEach(function (e) { e.classList.remove('active'); });
+                    this.classList.add('active');
+                    showPreview(idx);
                 });
+            });
 
-                progressFill.style.width = '80%';
-                statusText.textContent = 'Generating PDF...';
+            $results.style.display = 'block';
 
-                if (!resp.ok) {
-let errText = 'Server error';
-		try{
-const data = await resp.json();
-errText = data.error || errText;
-                    
-}
-catch(_){
-const text = await resp.text().catch(() => '');
-if(resp.status === 413){
-errText ='upload toolarge';
-}
-else if(text){
-errText = text.substring(0,200);
-
-}
-else{
-errText = 'Server Error';
-}
-}
-throw new Error(errText);
-  }
-
-                progressFill.style.width = '100%';
-                statusText.textContent = 'Done ✓';
-
-                const blob = await resp.blob();
-                const orderName = document.getElementById('orderName').value.trim() || 'Order';
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${orderName}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-
-                successMsg.textContent = 'PDF downloaded successfully!';
-                successMsg.style.display = 'block';
-
-            } catch (err) {
-                showError(err.message);
-                progressWrap.style.display = 'none';
-            } finally {
-                submitBtn.disabled = false;
+            if (n === 1) {
+                $matchList.querySelector('.match-item').classList.add('active');
+                showPreview(0);
             }
+        })
+        .catch(function (err) {
+            showStatus('Request failed: ' + err.message, '#f87171');
+            $pill.className = 'status-pill pill-pending';
+            $pill.textContent = 'Ready';
+        })
+        .finally(function () {
+            $btn.disabled = false;
+            $image.disabled = false;
         });
+    }
 
-        function showError(msg) {
-            errorMsg.textContent = msg;
-            errorMsg.style.display = 'block';
+    function showPreview(idx) {
+        if (!m4State) return;
+        var match = m4State.matches[idx];
+        $pdfLabel.innerHTML = escH(match.filename) +
+            ' <small style="display:inline;color:#888;">(' + match.page_count + ' page' +
+            (match.page_count > 1 ? 's' : '') + ' &bull; ' + match.similarity + '% match)</small>';
+
+        $pages.innerHTML = '';
+        for (var p = 0; p < match.page_count; p++) {
+            var img = document.createElement('img');
+            img.src = '/module3/page/' + m4State.search_id + '/' + idx + '/' + p;
+            img.alt = 'Page ' + (p + 1);
+            if (p > 0) img.loading = 'lazy';
+            $pages.appendChild(img);
         }
-    </script>
+        $preview.style.display = 'block';
+        $pages.scrollTop = 0;
+    }
+
+    $btn.addEventListener('click', doFind);
+    $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doFind(); } });
+})();
+</script>
+
 </body>
 </html>
 
-            
+        
+                
