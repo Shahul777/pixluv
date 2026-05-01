@@ -14,7 +14,9 @@ from PIL import Image, ExifTags, ImageCms
 from reportlab.lib.units import inch
 from reportlab.lib.colors import CMYKColor
 from reportlab.pdfgen import canvas
-
+from PIL import ImageEnhance
+from PIL import ImageFilter
+from PIL import ImageStat
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()
@@ -35,9 +37,9 @@ if HEIC_SUPPORTED:
 PAGE_W = 13.0
 PAGE_H = 19.0
 
-CUT_MARK_LEN = 0.08
-CUT_MARK_THICKNESS = 0.25
-CUT_MARK_COLOR = CMYKColor(0, 0, 0, 0.15)
+CUT_MARK_LEN = 0.25
+CUT_MARK_THICKNESS = 0.75
+CUT_MARK_COLOR = CMYKColor(0, 0, 0, 1.0)
 
 LABEL_COLOR = CMYKColor(0, 0, 0, 1.0)
 LABEL_FONT = "Helvetica"
@@ -50,11 +52,11 @@ LAYOUTS = {
         "label": "4x3 Polaroid (18 per sheet)",
         "cols": 3, "rows": 6, "max_images": 18,
         "cell_w": 4.0, "cell_h": 3.0,
-        "grid_left": 0.5, "grid_bottom": 1.0,
+        "grid_left": 0.5, "grid_bottom": 0.65,
         "photo_w": 3.0, "photo_h": 2.5,
         "offset_x": 0.75, "offset_y": 0.25,
         "frame_w_px": 750, "frame_h_px": 900,
-        "rotate": True, "label_y": 0.5,
+        "rotate": True, "label_y": 0.2,
     },
     "3x2_polaroid_36": {
         "label": "3x2 Polaroid (36 per sheet)",
@@ -64,7 +66,7 @@ LAYOUTS = {
         "photo_w": 2.25, "photo_h": 1.7,
         "offset_x": 0.57, "offset_y": 0.15,
         "frame_w_px": 510, "frame_h_px": 675,
-        "rotate": True, "label_y": 0.2,
+        "rotate": True, "label_y": 0.08,
     },
     "3x3_square_24": {
         "label": "3x3 Square (24 per sheet)",
@@ -74,7 +76,7 @@ LAYOUTS = {
         "photo_w": 2.6, "photo_h": 2.6,
         "offset_x": 0.2, "offset_y": 0.2,
         "frame_w_px": 780, "frame_h_px": 780,
-        "rotate": False, "label_y": 0.2,
+        "rotate": False, "label_y": 0.08,
     },
 }
 
@@ -127,33 +129,31 @@ def _fit_to_frame(img: Image.Image, frame_w: int, frame_h: int) -> Image.Image:
     return background
 
 def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
-    cmyk_profile_path = "CoatedGRACoL2006.icc" 
+    cmyk_profile_path = "ISOcoated_v2_eci.icc" 
 
     if os.path.exists(cmyk_profile_path):
         try:
             import io
             
             # 1. Get the Input Profile (Source)
-            # Try to extract the embedded profile from the original image first
             embedded_profile = img.info.get('icc_profile')
             if embedded_profile:
                 source_profile = ImageCms.ImageCmsProfile(io.BytesIO(embedded_profile))
             else:
-                # Fallback to standard sRGB if no profile is embedded
                 source_profile = ImageCms.createProfile("sRGB")
             
             # 2. Get the Output Profile (Destination)
-            # Use getOpenProfile() to load the physical file from your folder
             target_profile = ImageCms.getOpenProfile(cmyk_profile_path)
             
-            # 3. Apply the Transformation
-# 3. Apply the Transformation
+            
             return ImageCms.profileToProfile(
                 img,
                 source_profile,
                 target_profile,
-                renderingIntent=0,  # 0 is the universal code for Perceptual Intent
-                outputMode="CMYK"
+                renderingIntent=1,  # Relative Colorimetric
+                outputMode="CMYK",
+		flags=8192
+                   
             )
             
         except Exception as e:
@@ -177,9 +177,11 @@ def process_image(filepath: str, out_path: str, layout: dict) -> None:
     else:
         img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
         
-    # Apply the proper, profile-based conversion instead of naive conversion
+ 
+    # ------------------------------
+    #img = enhancer.enhance(1.08)
     img = convert_to_cmyk_properly(img)
-    
+    # img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
     img.save(out_path, "JPEG", quality=JPEG_QUALITY)
 
 def _create_placeholder(out_path: str, layout: dict) -> None:
@@ -198,18 +200,22 @@ def _draw_cut_marks(c: canvas.Canvas, layout: dict) -> None:
     cell_w, cell_h = layout["cell_w"], layout["cell_h"]
     grid_left, grid_bottom = layout["grid_left"], layout["grid_bottom"]
     mark = CUT_MARK_LEN * inch
+
+    grid_right = grid_left + cols * cell_w
+    grid_top = grid_bottom + rows * cell_h
+    for row in range(rows + 1):
+        y = (grid_bottom + row * cell_h) * inch
+        lx = grid_left * inch
+        rx = grid_right * inch
+        c.line(lx - mark, y, lx, y)
+        c.line(rx, y, rx + mark, y)
     for col in range(cols + 1):
-        for row in range(rows + 1):
-            x = (grid_left + col * cell_w) * inch
-            y = (grid_bottom + row * cell_h) * inch
-            if col > 0:
-                c.line(x - mark, y, x, y)
-            if col < cols:
-                c.line(x, y, x + mark, y)
-            if row > 0:
-                c.line(x, y - mark, x, y)
-            if row < rows:
-                c.line(x, y, x, y + mark)
+        x = (grid_left + col * cell_w) * inch
+        by = grid_bottom * inch
+        ty = grid_top * inch
+        c.line(x, by - mark, x, by)
+        c.line(x, ty, x, ty + mark)
+
 
 def _draw_order_label(c: canvas.Canvas, order_name: str, label_y: float) -> None:
     c.setFillColor(LABEL_COLOR)
