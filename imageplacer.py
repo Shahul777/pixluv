@@ -166,7 +166,7 @@ def process_image(filepath: str, out_path: str, layout: dict,
 
     if layout["rotate"]:
         w, h = img.size
-        if w > h:
+        if w < h:
             img = img.rotate(-90, expand=True)
             img = frame_fn(img, layout["frame_w_px"], layout["frame_h_px"], **extra)
             img = img.rotate(-90, expand=True)

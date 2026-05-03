@@ -753,6 +753,10 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <div>
       <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
     </div>
+
+    <div>
+        <button id="m5CleanBtn" class="btn btn-outline" style="padding:10px 16px;color: #fbbf24;border-color: #fbbf24;" disabled title="Remove non-image files from order folders">&#128465; Clean</button>
+    </div>
   </div>
 
   <div class="progress-section" id="m5Progress">
@@ -1632,6 +1636,7 @@ function enableControls() {
   var $ship       = document.getElementById('m5Ship');
   var $refresh    = document.getElementById('m5Refresh');
   var $runBtn     = document.getElementById('m5RunBtn');
+    var $cleanBtn     = document.getElementById('m5CleanBtn');
   var $circle     = document.getElementById('m5Circle');
   var $pill       = document.getElementById('m5Pill');
   var $progress   = document.getElementById('m5Progress');
@@ -1777,18 +1782,104 @@ var _totalPdfs = 0;
 
   $refresh.addEventListener('click', function () { loadShipFolders(); });
 
-  $ship.addEventListener('change', function () {
-    $runBtn.disabled = !this.value;
+ $ship.addEventListener('change', function () {
+  $runBtn.disabled = !this.value;
+  $cleanBtn.disabled = !this.value;
+});
+
+/* --- Clean order folders --- */
+$cleanBtn.addEventListener('click', function () {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
+  if (!confirm('This will DELETE all non-image files (zip, html, etc.) and images with "Note:" or "PIXLUV" in the filename from every order folder.\n\nContinue?')) return;
+
+  $cleanBtn.disabled = true;
+  $cleanBtn.textContent = 'Cleaning\u2026';
+
+  fetch('/polaroid/clean-orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ship_folder: shipFolder }),
+  })
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    if (data.error) {
+      alert('Error: ' + data.error);
+    } else {
+      var msg = 'Clean complete!\n\n' +
+        'Folders cleaned: ' + data.folders_cleaned + '\n' +
+        'Files deleted: ' + data.total_deleted + '\n' +
+        'Images OCR-scanned: ' + (data.ocr_scanned || 0);
+      if (data.deleted_files && data.deleted_files.length) {
+        msg += '\n\nDeleted:';
+        data.deleted_files.forEach(function (d) {
+          msg += '\n  ' + d.folder + '/' + d.file + ' (' + d.reason + ')';
+        });
+      }
+      alert(msg);
+    }
+  })
+  .catch(function (err) { alert('Failed: ' + err.message); })
+  .finally(function () {
+    $cleanBtn.disabled = false;
+    $cleanBtn.innerHTML = '&#128465; Clean';
   });
+});
 
-  /* --- Start bulk processing --- */
-  $runBtn.addEventListener('click', function () {
-    var shipFolder = $ship.value;
-    if (!shipFolder) return;
+$runBtn.addEventListener('click', function () {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
 
-    resetM5();
+  var choice = confirm(
+    'Do you want to clean order folders first?\n\n' +
+    'OK = Clean first (remove non-image files & Note:/PIXLUV images), then process\n' +
+    'Cancel = Already cleaned, start processing directly'
+  );
+
+  if (choice) {
+    // Clean first, then process
     $runBtn.disabled = true;
-    $ship.disabled = true;
+    $cleanBtn.disabled = true;
+    $runBtn.textContent = 'Cleaning...';
+    fetch('/polaroid/clean-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.error) {
+        alert('Clean error: ' + data.error);
+        $runBtn.disabled = false;
+        $cleanBtn.disabled = false;
+        $runBtn.innerHTML = '&#9654; Process All Orders';
+        return;
+      }
+      var msg = 'Cleaned ' + data.total_deleted + ' file(s) from ' + data.folders_cleaned + ' folder(s).';
+      if (data.total_deleted > 0) alert(msg);
+      $runBtn.innerHTML = '&#9654; Process All Orders';
+      startProcessing();
+    })
+    .catch(function (err) {
+      alert('Clean failed: ' + err.message);
+      $runBtn.disabled = false;
+      $cleanBtn.disabled = false;
+      $runBtn.innerHTML = '&#9654; Process All Orders';
+    });
+  } else {
+    // Already cleaned, process directly
+    startProcessing();
+  }
+});
+
+function startProcessing() {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
+
+  resetM5();
+  $runBtn.disabled = true;
+  $cleanBtn.disabled = true;
+  $ship.disabled = true;
     $refresh.disabled = true;
     $pill.className = 'status-pill pill-running';
         $pill.innerHTML = '&#9679; Running';
@@ -1839,7 +1930,7 @@ fetch('/polaroid/list-orders', {
     alert('Failed: ' + err.message);
     resetM5(); enableControls();
 });
-  });
+}
 function loadNextPreview() {
     if (_cancelled || _currentIdx >= _allOrders.length) {
         closePreview();
