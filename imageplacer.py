@@ -24,15 +24,7 @@ try:
     HEIC_SUPPORTED = True
 except ImportError:
     HEIC_SUPPORTED = False
-try:
-    import cv2
-    import numpy as np
-    _FACE_CASCADE = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
-    _CV2_AVAILABLE = True
-except ImportError:
-    _CV2_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 log = logging.getLogger("basa-web")
 
@@ -62,9 +54,9 @@ LAYOUTS = {
         "cols": 3, "rows": 6, "max_images": 18,
         "cell_w": 4.0, "cell_h": 3.0,
         "grid_left": 0.5, "grid_bottom": 0.65,
-        "photo_w": 3.35, "photo_h": 2.70,
-        "offset_x": 0.50, "offset_y": 0.15,
-        "frame_w_px": 810, "frame_h_px": 1005,
+        "photo_w": 3.0, "photo_h": 2.5,
+        "offset_x": 0.75, "offset_y": 0.25,
+        "frame_w_px": 750, "frame_h_px": 900,
         "rotate": True, "label_y": 0.2,
     },
     "3x2_polaroid_36": {
@@ -136,51 +128,7 @@ def _fit_to_frame(img: Image.Image, frame_w: int, frame_h: int) -> Image.Image:
     offset_y = (frame_h - new_h) // 2
     background.paste(img, (offset_x, offset_y))
     return background
-def _fill_to_frame(img: Image.Image, frame_w: int, frame_h: int,
-                   pan_x: float = 0.5, pan_y: float = 0.5) -> Image.Image:
-    """Fill mode: scale to cover the entire frame, then crop.
-    pan_x/pan_y are 0.0-1.0 controlling which part is visible (0.5 = center)."""
-    img_w, img_h = img.size
-    scale = max(frame_w / img_w, frame_h / img_h)
-    new_w = round(img_w * scale)
-    new_h = round(img_h * scale)
-    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    # Calculate crop offset based on pan values
-    max_offset_x = max(new_w - frame_w, 0)
-    max_offset_y = max(new_h - frame_h, 0)
-    crop_x = round(max_offset_x * pan_x)
-    crop_y = round(max_offset_y * pan_y)
-    img = img.crop((crop_x, crop_y, crop_x + frame_w, crop_y + frame_h))
-    return img
 
-def process_image(filepath: str, out_path: str, layout: dict,
-                  mode: str = "fill", pan_x: float = 0.5, pan_y: float = 0.5) -> None:
-    img = Image.open(filepath)
-    img = _apply_exif_orientation(img)
-    img = _flatten_alpha(img)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    frame_fn = _fit_to_frame if mode == "fit" else _fill_to_frame
-    extra = {"pan_x": pan_x, "pan_y": pan_y} if mode == "fill" else {}
-
-    if layout["rotate"]:
-        w, h = img.size
-        if w < h:
-            img = img.rotate(-90, expand=True)
-            img = frame_fn(img, layout["frame_w_px"], layout["frame_h_px"], **extra)
-            img = img.rotate(-90, expand=True)
-        else:
-            img = frame_fn(img, layout["frame_w_px"], layout["frame_h_px"], **extra)
-            
-            
-    img = convert_to_cmyk_properly(img)
-    # img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-    img.save(out_path, "JPEG", quality=JPEG_QUALITY)
-            
-    
-    img = img.convert("CMYK")
-    img.save(out_path, "JPEG", quality=JPEG_QUALITY)
 def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
     cmyk_profile_path = "ISOcoated_v2_eci.icc" 
 
@@ -215,43 +163,8 @@ def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
     else:
         log.warning(f"ICC profile '{cmyk_profile_path}' not found in script directory. Using naive conversion.")
         return img.convert("CMYK")
-def _detect_face_pan(img: Image.Image) -> tuple[float, float]:
-    """Detect faces and return (pan_x, pan_y) to center the crop on them.
-    Returns (0.5, 0.5) if no faces found or OpenCV unavailable."""
-    if not _CV2_AVAILABLE:
-        return 0.5, 0.5
-    try:
-        # Resize for fast detection (max 300px on longest side)
-        w, h = img.size
-        scale = min(300 / max(w, h), 1.0)
-        small = img.resize((round(w * scale), round(h * scale)), Image.Resampling.BILINEAR)
-        gray = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2GRAY)
-        faces = _FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
-        if len(faces) == 0:
-            return 0.5, 0.5
-        # Average center of all detected faces
-        cx_sum, cy_sum = 0.0, 0.0
-        for (fx, fy, fw, fh) in faces:
-            cx_sum += fx + fw / 2.0
-            cy_sum += fy + fh / 2.0
-        sw, sh = small.size
-        pan_x = (cx_sum / len(faces)) / sw
-        pan_y = (cy_sum / len(faces)) / sh
-        return round(max(0.0, min(1.0, pan_x)), 3), round(max(0.0, min(1.0, pan_y)), 3)
-    except Exception:
-        return 0.5, 0.5
-
-def make_thumbnail(filepath: str, layout: dict, max_size: int = 200) -> tuple[str, float, float]:
-    """Return (base64_jpeg, pan_x, pan_y) thumbnail for the browser preview.
-    pan_x/pan_y are auto-detected from face positions (0.5 = center)."""
-    import base64
+def process_image(filepath: str, out_path: str, layout: dict) -> None:
     img = Image.open(filepath)
-
-    # Use draft mode for JPEG to load at reduced resolution (much faster)
-    if hasattr(img, 'draft') and img.format == 'JPEG':
-        img.draft('RGB', (800, 800))
-        img.load()
-
     img = _apply_exif_orientation(img)
     img = _flatten_alpha(img)
     if img.mode != "RGB":
@@ -260,15 +173,18 @@ def make_thumbnail(filepath: str, layout: dict, max_size: int = 200) -> tuple[st
         w, h = img.size
         if w > h:
             img = img.rotate(-90, expand=True)
+        img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        img = img.rotate(-90, expand=True)
+    else:
+        img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        
+ 
+    # ------------------------------
+    #img = enhancer.enhance(1.08)
+    img = convert_to_cmyk_properly(img)
+    # img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+    img.save(out_path, "JPEG", quality=JPEG_QUALITY)
 
-    # Detect faces before shrinking to thumbnail
-    pan_x, pan_y = _detect_face_pan(img)
-
-    img.thumbnail((max_size, max_size), Image.Resampling.BILINEAR)
-    buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=40)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return b64, pan_x, pan_y
 def _create_placeholder(out_path: str, layout: dict) -> None:
     fw, fh = layout["frame_w_px"], layout["frame_h_px"]
     if layout["rotate"]:
@@ -307,9 +223,7 @@ def _draw_order_label(c: canvas.Canvas, order_name: str, label_y: float) -> None
     c.setFont(LABEL_FONT, LABEL_SIZE)
     c.drawCentredString((PAGE_W / 2.0) * inch, label_y * inch, order_name)
 
-def generate_pdf(image_paths: list[str], output_path: str, order_name: str,
-                 layout: dict, adjustments: list[dict] | None = None) -> None:
-    """adjustments: optional list of {'mode': 'fill'|'fit', 'pan_x': 0-1, 'pan_y': 0-1} per image."""
+def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layout: dict) -> None:
     tmp_dir = tempfile.mkdtemp(prefix="basa_web_")
     tmp_files: list[str] = []
 
@@ -325,12 +239,7 @@ def generate_pdf(image_paths: list[str], output_path: str, order_name: str,
         for idx, src in enumerate(image_paths):
             try:
                 tmp_path = os.path.join(tmp_dir, f"img_{idx:02d}.jpg")
-                adj = (adjustments[idx] if adjustments and idx < len(adjustments)
-                       else {"mode": "fill", "pan_x": 0.5, "pan_y": 0.5})
-                process_image(src, tmp_path, layout,
-                              mode=adj.get("mode", "fill"),
-                              pan_x=adj.get("pan_x", 0.5),
-                              pan_y=adj.get("pan_y", 0.5))
+                process_image(src, tmp_path, layout)
                 tmp_files.append(tmp_path)
                 processed.append(tmp_path)
             except Exception:
