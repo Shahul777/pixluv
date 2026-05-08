@@ -342,6 +342,105 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
             .form-row { flex-direction: column; }
             .module-desc { margin-left: 0; }
         }
+        /* — Preview grid (Module 5) ———————————————— */
+.preview-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(10,10,30,0.95); backdrop-filter: blur(8px);
+  display: flex; flex-direction: column;
+  overflow: hidden; padding: 8px 12px;
+}
+.preview-overlay.hidden { display: none; }
+
+.preview-header {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 6px; flex-shrink: 0;
+}
+.preview-header h3 {
+  color: #c4b5fd; font-size: 1rem; margin: 0;
+}
+.preview-info {
+  display: flex; gap: 12px; font-size: .82rem; color: #aaa;
+}
+.preview-info .tag { padding: 3px 10px; border-radius: 12px; font-weight: 600; }
+
+.preview-grid {
+  display: grid; gap: 4px;
+  width: 100%; flex: 1; min-height: 0;
+  align-content: start; overflow-y: auto;
+  justify-content: center;
+}
+.preview-cell {
+  position: relative; overflow: hidden;
+  background: #1e1e3a; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px; cursor: grab;
+  width: 100%; height: 100%;
+}
+.preview-cell.mode-fit {
+  cursor: default;
+}
+.preview-cell:active { cursor: grabbing; }
+.preview-cell img {
+  display: block; user-select: none; pointer-events: none;
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+}
+.preview-cell.mode-fill img {
+  object-fit: cover;
+}
+.preview-cell.mode-fit img {
+  object-fit: contain;
+  background: white;
+}
+.cell-toolbar {
+  position: absolute; top: 2px; right: 2px; z-index: 2;
+  display: flex; gap: 3px;
+}
+.cell-btn {
+  width: 22px; height: 22px; border: none; border-radius: 4px;
+  font-size: .65rem; font-weight: 700; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0.7; transition: opacity .2s;
+}
+.cell-btn:hover { opacity: 1; }
+.cell-btn-mode {
+  background: rgba(124,58,237,0.8); color: white;
+}
+.cell-btn-mode.active-fit {
+  background: rgba(234,179,8,0.8); color: #1e1e2e;
+}
+.cell-label {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.65); color: #ccc;
+  font-size: .6rem; padding: 1px 4px;
+  text-align: center; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; pointer-events: none;
+}
+
+.preview-actions {
+  display: flex; gap: 12px; margin-top: 8px; align-items: center;
+  justify-content: center; flex-shrink: 0;
+}
+.preview-actions .btn { padding: 10px 32px; font-size: .95rem; }
+
+.preview-counter {
+  color: #888; font-size: .85rem;
+}
+
+.preview-batch-bar {
+  width: 100%;
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 6px; flex-shrink: 0;
+}
+.batch-progress {
+  flex: 1; height: 6px; background: rgba(255,255,255,0.08);
+  border-radius: 3px; overflow: hidden;
+}
+.batch-progress-fill {
+  height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  transition: width .3s;
+}
+.batch-counter { color: #aaa; font-size: .82rem; font-weight: 600; white-space: nowrap; }
+
     </style>
 </head>
 <body>
@@ -653,6 +752,10 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     </div>
     <div>
       <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+    </div>
+
+    <div>
+        <button id="m5CleanBtn" class="btn btn-outline" style="padding:10px 16px;color: #fbbf24;border-color: #fbbf24;" disabled title="Remove non-image files from order folders">&#128465; Clean</button>
     </div>
   </div>
 
@@ -1502,6 +1605,28 @@ function enableControls() {
     $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doFind(); } });
 })();
 </script>
+<div class="preview-overlay hidden" id="m5PreviewOverlay">
+  <div class="preview-batch-bar">
+    <div class="batch-progress">
+      <div class="batch-progress-fill" id="m5BatchFill" style="width:0%"></div>
+    </div>
+    <span class="batch-counter" id="m5BatchCounter">0 / 0</span>
+  </div>
+  <div class="preview-header">
+    <h3 id="m5PreviewTitle">Order Preview</h3>
+    <div class="preview-info">
+      <span class="tag tag-variant" id="m5PreviewVariant"></span>
+      <span style="color: #aaa;" id="m5PreviewPhotos"></span>
+    </div>
+  </div>
+  <div class="preview-grid" id="m5PreviewGrid"></div>
+  <div class="preview-actions">
+    <button class="btn btn-success" id="m5ConfirmBtn">&#10003; Confirm &amp; Generate PDF</button>
+    <button class="btn btn-outline" id="m5SkipBtn" style="display:none;">&#9654; Skip Order</button>
+    <button class="btn btn-outline" id="m5CancelBatch" style="display:none;">&#10005; Cancel</button>
+    <span class="preview-counter" id="m5PreviewCounter"></span>
+  </div>
+</div>
 <script>
 (function () {
   var M5_STAGES = ['scan','prepare','process','done'];
@@ -1511,6 +1636,7 @@ function enableControls() {
   var $ship       = document.getElementById('m5Ship');
   var $refresh    = document.getElementById('m5Refresh');
   var $runBtn     = document.getElementById('m5RunBtn');
+    var $cleanBtn     = document.getElementById('m5CleanBtn');
   var $circle     = document.getElementById('m5Circle');
   var $pill       = document.getElementById('m5Pill');
   var $progress   = document.getElementById('m5Progress');
@@ -1525,9 +1651,27 @@ function enableControls() {
   var $table      = document.getElementById('m5Table');
   var $tbody      = document.getElementById('m5Tbody');
   var $count      = document.getElementById('m5Count');
+  var $overlay      = document.getElementById('m5PreviewOverlay');
+var $prevTitle    = document.getElementById('m5PreviewTitle');
+var $prevVariant  = document.getElementById('m5PreviewVariant');
+var $prevPhotos   = document.getElementById('m5PreviewPhotos');
+var $prevGrid     = document.getElementById('m5PreviewGrid');
+var $confirmBtn   = document.getElementById('m5ConfirmBtn');
+var $skipBtn      = document.getElementById('m5SkipBtn');
+var $cancelBatch  = document.getElementById('m5CancelBatch');
+var $prevCounter  = document.getElementById('m5PreviewCounter');
+var $batchFill    = document.getElementById('m5BatchFill');
+var $batchCounter = document.getElementById('m5BatchCounter');
 
   var completedStages = new Set();
-
+var _allOrders = [];
+var _currentIdx = 0;
+var _shipFolder = '';
+var _batchResults = [];
+var _cancelled = false;
+var _currentPreview = null; // current order preview data
+var _adjustments = [];      // per-image adjustments for current order
+var _totalPdfs = 0;
   function escH5(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
   function setChip(name, state) {
@@ -1638,24 +1782,66 @@ function enableControls() {
 
   $refresh.addEventListener('click', function () { loadShipFolders(); });
 
-  $ship.addEventListener('change', function () {
-    $runBtn.disabled = !this.value;
+ $ship.addEventListener('change', function () {
+  $runBtn.disabled = !this.value;
+  $cleanBtn.disabled = !this.value;
+});
+
+/* --- Clean order folders --- */
+$cleanBtn.addEventListener('click', function () {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
+  if (!confirm('This will DELETE all non-image files (zip, html, etc.) and images with "Note:" or "PIXLUV" in the filename from every order folder.\n\nContinue?')) return;
+
+  $cleanBtn.disabled = true;
+  $cleanBtn.textContent = 'Cleaning\u2026';
+
+  fetch('/polaroid/clean-orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ship_folder: shipFolder }),
+  })
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    if (data.error) {
+      alert('Error: ' + data.error);
+    } else {
+      var msg = 'Clean complete!\n\n' +
+        'Folders cleaned: ' + data.folders_cleaned + '\n' +
+        'Files deleted: ' + data.total_deleted + '\n' +
+        'Images OCR-scanned: ' + (data.ocr_scanned || 0);
+      if (data.deleted_files && data.deleted_files.length) {
+        msg += '\n\nDeleted:';
+        data.deleted_files.forEach(function (d) {
+          msg += '\n  ' + d.folder + '/' + d.file + ' (' + d.reason + ')';
+        });
+      }
+      alert(msg);
+    }
+  })
+  .catch(function (err) { alert('Failed: ' + err.message); })
+  .finally(function () {
+    $cleanBtn.disabled = false;
+    $cleanBtn.innerHTML = '&#128465; Clean';
   });
+});
 
-  /* --- Start bulk processing --- */
-  $runBtn.addEventListener('click', function () {
-    var shipFolder = $ship.value;
-    if (!shipFolder) return;
+$runBtn.addEventListener('click', function () {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
 
-    resetM5();
+  var choice = confirm(
+    'Do you want to clean order folders first?\n\n' +
+    'OK = Clean first (remove non-image files & Note:/PIXLUV images), then process\n' +
+    'Cancel = Already cleaned, start processing directly'
+  );
+
+  if (choice) {
+    // Clean first, then process
     $runBtn.disabled = true;
-    $ship.disabled = true;
-    $refresh.disabled = true;
-    $pill.className = 'status-pill pill-running';
-        $pill.innerHTML = '&#9679; Running';
-    $progress.classList.add('visible');
-
-    fetch('/polaroid/start', {
+    $cleanBtn.disabled = true;
+    $runBtn.textContent = 'Cleaning...';
+    fetch('/polaroid/clean-orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ship_folder: shipFolder }),
@@ -1663,84 +1849,460 @@ function enableControls() {
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (data.error) {
-        alert(data.error);
-        resetM5();
+        alert('Clean error: ' + data.error);
         $runBtn.disabled = false;
-        $ship.disabled = false;
-        $refresh.disabled = false;
+        $cleanBtn.disabled = false;
+        $runBtn.innerHTML = '&#9654; Process All Orders';
         return;
       }
-      subscribeM5(data.task_id);
+      var msg = 'Cleaned ' + data.total_deleted + ' file(s) from ' + data.folders_cleaned + ' folder(s).';
+      if (data.total_deleted > 0) alert(msg);
+      $runBtn.innerHTML = '&#9654; Process All Orders';
+      startProcessing();
     })
     .catch(function (err) {
-      alert('Request failed: ' + err.message);
+      alert('Clean failed: ' + err.message);
       $runBtn.disabled = false;
-      $ship.disabled = false;
-      $refresh.disabled = false;
+      $cleanBtn.disabled = false;
+      $runBtn.innerHTML = '&#9654; Process All Orders';
     });
-  });
+  } else {
+    // Already cleaned, process directly
+    startProcessing();
+  }
+});
 
-  function subscribeM5(taskId) {
-    var es = new EventSource('/polaroid/progress/' + encodeURIComponent(taskId));
+function startProcessing() {
+  var shipFolder = $ship.value;
+  if (!shipFolder) return;
 
-    es.onmessage = function (ev) {
-      var d = JSON.parse(ev.data);
+  resetM5();
+  $runBtn.disabled = true;
+  $cleanBtn.disabled = true;
+  $ship.disabled = true;
+    $refresh.disabled = true;
+    $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+    $progress.classList.add('visible');
 
-      if (d.error) {
-        es.close();
-        $bar.style.width = '100%';
-        $bar.classList.add('error');
-        $pct.textContent = 'Error';
-        $dot.classList.add('error');
-        $stage.textContent = 'Failed';
-        $detail.textContent = d.error;
-        $eta.textContent = '';
-        setChip(d.stage || 'error', 'errored');
-        $pill.className = 'status-pill';
-        $pill.style.background = 'rgba(239,68,68,0.15)';
-        $pill.style.color = '#f87171';
-        $pill.textContent = 'Error';
-        enableControls();
+    $stage.textContent = 'Scanning orders...';
+    setChip('scan', 'active');
+
+// Step 1: Fetch order list
+fetch('/polaroid/list-orders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ship_folder: shipFolder }),
+})
+.then(function (r) { return r.json(); })
+.then(function (data) {
+    if (data.error) {
+        alert(data.error);
+        resetM5(); enableControls();
         return;
-      }
+    }
+    
+    setChip('scan', 'completed');
+    completedStages.add('scan');
 
-      var pct = Math.min(d.pct, 100);
-      $bar.style.width = pct + '%';
-      $pct.textContent = pct + '%';
-      $stage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
-      $detail.textContent = d.detail || '';
+    _allOrders = data.orders;
+    _shipFolder = shipFolder;
+    _currentIdx = 0;
+    _batchResults = [];
+    _cancelled = false;
+    _totalPdfs = 0;
 
-      if (d.order_name) {
-        $orderCur.style.display = 'block';
-        $orderCur.textContent = '📁 ' + d.order_name +
-          (d.order_total ? ' (' + (d.order_index + 1) + '/' + d.order_total + ')' : '');
-      }
+    $bar.style.width = '5%';
+    $pct.textContent = '5%';
+    $detail.textContent = 'Found ' + _allOrders.length + ' order(s). Loading previews...';
 
-      markPrior(d.stage);
-      if (!d.done) setChip(d.stage, 'active');
+    if (!_allOrders.length) {
+        $detail.textContent = 'No order folders found.';
+        setChip('done', 'completed');
+        finishBatch();
+        return;
+    }
 
-      if (d.done) {
-        es.close();
-        completedStages.add(d.stage);
-        M5_STAGES.forEach(function (s) { setChip(s, 'completed'); });
-        $bar.classList.add('done');
-        $dot.classList.add('done');
-        $circle.classList.add('done');
-        $pill.className = 'status-pill pill-done';
-        $pill.innerHTML = '&#10003; Done';
-        $orderCur.style.display = 'none';
-              if (d.result) {
-        var r = d.result;
-        document.getElementById('m5SumProcessed').textContent = r.processed;
-        document.getElementById('m5SumSkipped').textContent = r.skipped;
-        document.getElementById('m5SumPdfs').textContent = r.total_pdfs;
-        document.getElementById('m5SumTime').textContent = r.elapsed + 's';
-        document.getElementById('m5SumOutput').textContent = r.output_folder;
-        $summary.classList.add('visible');
+    setChip('prepare', 'active');
+    loadNextPreview();
+})
+.catch(function (err) {
+    alert('Failed: ' + err.message);
+    resetM5(); enableControls();
+});
+}
+function loadNextPreview() {
+    if (_cancelled || _currentIdx >= _allOrders.length) {
+        closePreview();
+        finishBatch();
+        return;
+    }
 
-        if (r.orders && r.orders.length) {
-          $count.textContent = r.orders.length;
-          $tbody.innerHTML = r.orders.map(function (o, i) {
+    var order = _allOrders[_currentIdx];
+
+    // Skip already-processed orders
+    if (order.already_done) {
+        _batchResults.push({
+            folder: order.folder, variant: order.variant,
+            order_id: order.order_id, status: 'skipped',
+            pdfs: 0, photos: order.photos,
+        });
+        _currentIdx++;
+        updateBatchProgress();
+        loadNextPreview();
+        return;
+    }
+
+    // Skip orders with no images
+    if (order.photos === 0) {
+        _batchResults.push({
+            folder: order.folder, variant: order.variant,
+            order_id: order.order_id, status: 'no images',
+            pdfs: 0, photos: 0,
+        });
+        _currentIdx++;
+        updateBatchProgress();
+        loadNextPreview();
+        return;
+    }
+
+    // Fetch preview
+    $detail.textContent = 'Loading preview for: ' + order.folder;
+    setChip('process', 'active');
+    markPrior('process');
+        fetch('/polaroid/preview-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_path: order.path }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (preview) {
+        if (preview.error) {
+            _batchResults.push({
+                folder: order.folder, variant: order.variant,
+                order_id: order.order_id, status: preview.error,
+                pdfs: 0, photos: order.photos,
+            });
+            _currentIdx++;
+            updateBatchProgress();
+            loadNextPreview();
+            return;
+        }
+        _currentPreview = preview;
+        showPreview(preview);
+    })
+    .catch(function (err) {
+        _batchResults.push({
+            folder: order.folder, variant: order.variant,
+            order_id: order.order_id, status: 'error: ' + err.message,
+            pdfs: 0, photos: order.photos,
+        });
+        _currentIdx++;
+        updateBatchProgress();
+        loadNextPreview();
+    });
+}
+
+function updateBatchProgress() {
+    var pct = Math.round((_currentIdx / _allOrders.length) * 100);
+    $batchFill.style.width = pct + '%';
+    $batchCounter.textContent = _currentIdx + ' / ' + _allOrders.length;
+    $bar.style.width = (10 + pct * 0.85) + '%';
+    $pct.textContent = Math.round(10 + pct * 0.85) + '%';
+}
+
+/* --- Show Preview Overlay --- */
+function showPreview(preview) {
+    $prevTitle.textContent = preview.folder;
+    $prevVariant.textContent = preview.variant;
+    $prevPhotos.textContent = preview.photos + ' photo(s), ' + preview.num_pdfs + ' PDF(s)';
+    $prevCounter.textContent = 'Order ' + (_currentIdx + 1) + ' of ' + _allOrders.length;
+    updateBatchProgress();
+
+    // Build grid - landscape fullscreen layout
+    var totalImages = preview.thumbnails.length;
+    // Cell aspect ratio (w:h) for display
+    var arW = 1, arH = 1;
+    if (preview.variant === '4x3') { arW = 3; arH = 4; }      // rotated: portrait cells
+    else if (preview.variant === '3x2') { arW = 2; arH = 3; } // rotated: portrait cells
+    else { arW = 1; arH = 1; }                                // square
+    if (!preview.rotate) {
+        if (preview.variant === '4x3') { arW = 4; arH = 3; }
+        else if (preview.variant === '3x2') { arW = 3; arH = 2; }
+    }
+    var aspectR = arW / arH;
+
+    // Available space for the grid
+    var gap = 4;
+    var availH = window.innerHeight - 110; // header + batch bar + actions + padding
+    var availW = window.innerWidth - 24;
+
+    // Try column counts, pick the one giving the largest cells that fit on screen
+    var bestCols = preview.cols;
+    var bestCellW = 0, bestCellH = 0;
+    for (var tryC = 3; tryC <= Math.min(totalImages, 18); tryC++) {
+        var tryRows = Math.ceil(totalImages / tryC);
+        var cw = (availW - (tryC - 1) * gap) / tryC;
+        var ch = cw / aspectR;
+        var totalH = tryRows * ch + (tryRows - 1) * gap;
+        // If grid too tall, constrain by height
+        if (totalH > availH) {
+            ch = (availH - (tryRows - 1) * gap) / tryRows;
+            cw = ch * aspectR;
+        }
+        if (cw > bestCellW) { bestCellW = cw; bestCellH = cw / aspectR; bestCols = tryC; }
+    }
+    // Recompute final cell dims for bestCols
+    var finalRows = Math.ceil(totalImages / bestCols);
+    bestCellW = (availW - (bestCols - 1) * gap) / bestCols;
+    bestCellH = bestCellW / aspectR;
+    var finalGridH = finalRows * bestCellH + (finalRows - 1) * gap;
+    if (finalGridH > availH) {
+        bestCellH = (availH - (finalRows - 1) * gap) / finalRows;
+        bestCellW = bestCellH * aspectR;
+    }
+        bestCellW = Math.floor(bestCellW);
+    bestCellH = Math.floor(bestCellH);
+
+    $prevGrid.style.gridTemplateColumns = 'repeat(' + bestCols + ', ' + bestCellW + 'px)';
+    $prevGrid.style.gridAutoRows = bestCellH + 'px';
+    $prevGrid.innerHTML = '';
+
+    _adjustments = [];
+
+    preview.thumbnails.forEach(function (thumb, i) {
+        var autoPanX = thumb.pan_x != null ? thumb.pan_x : 0.5;
+        var autoPanY = thumb.pan_y != null ? thumb.pan_y : 0.5;
+
+        _adjustments.push({
+            mode: 'fill',
+            pan_x: autoPanX,
+            pan_y: autoPanY,
+        });
+
+        var cell = document.createElement('div');
+        cell.className = 'preview-cell mode-fill';
+        cell.dataset.index = i;
+
+        var img = document.createElement('img');
+        if (thumb.thumbnail) {
+            img.src = 'data:image/jpeg;base64,' + thumb.thumbnail;
+        }
+        img.alt = thumb.filename;
+        img.draggable = false;
+        
+        // Apply auto-pan position
+        img.style.objectPosition = (autoPanX * 100) + '% ' + (autoPanY * 100) + '%';
+
+        // Toolbar
+        var toolbar = document.createElement('div');
+        toolbar.className = 'cell-toolbar';
+
+        var modeBtn = document.createElement('button');
+        modeBtn.className = 'cell-btn cell-btn-mode';
+        modeBtn.textContent = 'F';
+        modeBtn.title = 'Toggle Fill/Fit';
+        modeBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            toggleMode(i, cell, modeBtn);
+        });
+        toolbar.appendChild(modeBtn);
+
+        // Label
+        var label = document.createElement('div');
+        label.className = 'cell-label';
+        label.textContent = (i + 1) + '. ' + thumb.filename;
+
+        cell.appendChild(toolbar);
+        cell.appendChild(img);
+        cell.appendChild(label);
+        $prevGrid.appendChild(cell);
+
+        // Drag / pan support for fill mode
+        setupPan(cell, img, i);
+    });
+
+    $overlay.classList.remove('hidden');
+}
+
+function toggleMode(idx, cell, btn) {
+    if (_adjustments[idx].mode === 'fill') {
+        _adjustments[idx].mode = 'fit';
+        _adjustments[idx].pan_x = 0.5;
+        _adjustments[idx].pan_y = 0.5;
+        cell.className = 'preview-cell mode-fit';
+        btn.classList.add('active-fit');
+        btn.textContent = 'FT';
+        btn.title = 'Mode: Fit (click for Fill)';
+        // Reset image transform
+        var img = cell.querySelector('img');
+        img.style.transform = '';
+        img.style.objectPosition = '';
+    } else {
+        _adjustments[idx].mode = 'fill';
+        _adjustments[idx].pan_x = 0.5;
+        _adjustments[idx].pan_y = 0.5;
+        cell.className = 'preview-cell mode-fill';
+        btn.classList.remove('active-fit');
+        btn.textContent = 'F';
+        btn.title = 'Mode: Fill (click for Fit)';
+        var img = cell.querySelector('img');
+        img.style.transform = '';
+        img.style.objectPosition = 'center center';
+    }
+}
+function setupPan(cell, img, idx) {
+    var startX, startY, startPanX, startPanY, dragging = false;
+
+    function onDown(e) {
+        if (_adjustments[idx].mode !== 'fill') return;
+        dragging = true;
+        startX = e.clientX || (e.touches && e.touches[0].clientX);
+        startY = e.clientY || (e.touches && e.touches[0].clientY);
+        startPanX = _adjustments[idx].pan_x;
+        startPanY = _adjustments[idx].pan_y;
+        e.preventDefault();
+    }
+    
+    function onMove(e) {
+        if (!dragging) return;
+        var cx = e.clientX || (e.touches && e.touches[0].clientX);
+        var cy = e.clientY || (e.touches && e.touches[0].clientY);
+        var dx = cx - startX;
+        var dy = cy - startY;
+        var cellW = cell.offsetWidth;
+        var cellH = cell.offsetHeight;
+        
+        // Moving right/down should decrease pan values (show left/top more)
+        var newPanX = Math.max(0, Math.min(1, startPanX - dx / cellW));
+        var newPanY = Math.max(0, Math.min(1, startPanY - dy / cellH));
+        
+        _adjustments[idx].pan_x = newPanX;
+        _adjustments[idx].pan_y = newPanY;
+        
+        // Visual feedback using object-position
+        img.style.objectPosition = (newPanX * 100) + '% ' + (newPanY * 100) + '%';
+    }
+    
+    function onUp() { dragging = false; }
+
+    cell.addEventListener('mousedown', onDown);
+    cell.addEventListener('touchstart', onDown, { passive: false });
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchend', onUp);
+}
+
+function closePreview() {
+    $overlay.classList.add('hidden');
+    $prevGrid.innerHTML = '';
+}
+
+/* --- Confirm order: generate PDF --- */
+$confirmBtn.addEventListener('click', function () {
+    $confirmBtn.disabled = true;
+    $confirmBtn.textContent = 'Generating...';
+
+    var order = _allOrders[_currentIdx];
+
+    fetch('/polaroid/confirm-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            order_path: order.path,
+            ship_folder: _shipFolder,
+            adjustments: _adjustments,
+        }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (data.error) {
+            alert('Error: ' + data.error);
+            $confirmBtn.disabled = false;
+            $confirmBtn.innerHTML = '&#10003; Confirm &amp; Generate PDF';
+            return;
+        }
+        
+        _totalPdfs += data.pdfs.length;
+        _batchResults.push({
+            folder: order.folder, variant: order.variant,
+            order_id: order.order_id, status: 'done',
+            pdfs: data.pdfs.length, photos: order.photos,
+        });
+        
+        $confirmBtn.disabled = false;
+        $confirmBtn.innerHTML = '&#10003; Confirm &amp; Generate PDF';
+        closePreview();
+        _currentIdx++;
+        updateBatchProgress();
+        loadNextPreview();
+    })
+    .catch(function (err) {
+        alert('Failed: ' + err.message);
+        $confirmBtn.disabled = false;
+        $confirmBtn.innerHTML = '&#10003; Confirm &amp; Generate PDF';
+    });
+});
+
+/* --- Skip order --- */
+$skipBtn.addEventListener('click', function () {
+    var order = _allOrders[_currentIdx];
+    
+        _batchResults.push({
+        folder: order.folder, variant: order.variant,
+        order_id: order.order_id, status: 'skipped',
+        pdfs: 0, photos: order.photos,
+    });
+    closePreview();
+    _currentIdx++;
+    updateBatchProgress();
+    loadNextPreview();
+});
+
+/* --- Cancel entire batch --- */
+$cancelBatch.addEventListener('click', function () {
+    _cancelled = true;
+    closePreview();
+    finishBatch();
+});
+
+/* --- Finish batch processing --- */
+function finishBatch() {
+    setChip('process', 'completed');
+    completedStages.add('process');
+    setChip('done', 'completed');
+    completedStages.add('done');
+
+    $bar.style.width = '100%';
+    $bar.classList.add('done');
+    $pct.textContent = '100%';
+    $dot.classList.add('done');
+    $circle.classList.add('done');
+    $pill.className = 'status-pill pill-done';
+    $pill.innerHTML = '&#10003; Done';
+    $stage.textContent = 'Completed';
+
+    var processed = 0, skipped = 0;
+    _batchResults.forEach(function (r) {
+        if (r.status === 'done') processed++;
+        else skipped++;
+    });
+
+    $detail.textContent = processed + ' processed, ' + skipped + ' skipped, ' +
+                          _totalPdfs + ' PDFs generated.';
+
+    document.getElementById('m5SumProcessed').textContent = processed;
+    document.getElementById('m5SumSkipped').textContent = skipped;
+    document.getElementById('m5SumPdfs').textContent = _totalPdfs;
+    document.getElementById('m5SumTime').textContent = '-';
+    document.getElementById('m5SumOutput').textContent = '-';
+    $summary.classList.add('visible');
+
+    if (_batchResults.length) {
+        $count.textContent = _batchResults.length;
+        $tbody.innerHTML = _batchResults.map(function (o, i) {
+            
             var statusTag = o.status === 'done'
               ? '<span class="tag" style="background:rgba(34,197,94,.15);color:#4ade80;">Done</span>'
               : o.status === 'skipped'
@@ -1758,18 +2320,10 @@ function enableControls() {
           }).join('');
           $table.classList.add('visible');
         }
-      }
+  
       enableControls();
     }
-  };
 
-  es.onerror = function () {
-    es.close();
-    $stage.textContent = 'Connection lost';
-    $dot.classList.add('error');
-    enableControls();
-  };
-}
 
 function enableControls() {
   $runBtn.disabled = !$ship.value;
@@ -1995,4 +2549,3 @@ $searchId.addEventListener('keydown', function (e) {
 
 </body>
 </html>
-                

@@ -5,6 +5,7 @@ import queue
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from natsort import natsorted
@@ -13,14 +14,54 @@ from flask import Blueprint, Response, jsonify, request
 from db import get_setting, set_setting, log_activity
 
 # --- Import image-placement engine from imageplacer.py ---
-from imageplacer import LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf
+from imageplacer import LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf, make_thumbnail
 
 polaroid_bp = Blueprint("polaroid", __name__)
+# --- OCR engine (lazy-loaded) ----------------------------------------------------
+_ocr_engine = None
+_OCR_AVAILABLE = False
 
+def _get_ocr():
+    """Lazy-load RapidOCR engine on first use."""
+    global _ocr_engine, _OCR_AVAILABLE
+    if _ocr_engine is not None:
+        return _ocr_engine
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        _ocr_engine = RapidOCR()
+        _OCR_AVAILABLE = True
+    except ImportError:
+        _ocr_engine = False  # sentinel: attempted but not available
+        _OCR_AVAILABLE = False
+    return _ocr_engine
+
+def _ocr_contains_blacklist(image_path: Path, words: list[str]) -> str | None:
+    """Run OCR on an image and return the first blacklisted word found
+    in the detected text, or None if clean.  Resizes to 400px for speed."""
+    ocr = _get_ocr()
+    if not ocr or ocr is False:
+        return None
+    try:
+        import numpy as np
+        img = Image.open(image_path)
+        img.thumbnail((400, 400), Image.LANCZOS)
+        img_array = np.array(img.convert("RGB"))
+        result, _ = ocr(img_array)
+        if not result:
+            return None
+        full_text = " ".join(line[1] for line in result).lower()
+        for w in words:
+            if w in full_text:
+                return w
+    except Exception:
+        pass
+    return None
+
+# --- Progress infrastructure (same pattern as Module 1 in app.py) ----------
 # --- Progress infrastructure (same pattern as Module 1 in app.py) ---
 _pq: dict[str, queue.Queue] = {}
 _pq_lock = threading.Lock()
-
+from PIL import Image
 SETTING_BASE_FOLDER = "polaroid_base_folder"
 
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
@@ -342,6 +383,168 @@ def polaroid_progress(task_id: str):
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no"})
+@polaroid_bp.route("/polaroid/list-orders", methods=["POST"])
+def list_orders():
+    """Return the list of all order folders inside a ship folder with
+    metadata (variant, image count, whether already processed)."""
+    data = request.get_json(silent=True) or {}
+    ship_folder = data.get("ship_folder", "").strip()
+    if not ship_folder or not Path(ship_folder).is_dir():
+        return jsonify({"error": "Ship folder not found."}), 400
+
+    ship_path = Path(ship_folder)
+    output_dir = _output_folder_for(ship_path)
+
+    orders = []
+    for d in sorted(ship_path.iterdir(), key=lambda x: x.name.lower()):
+        if not d.is_dir():
+            continue
+        folder_name = d.name
+        variant = _detect_variant(folder_name)
+        order_id = _extract_order_id(folder_name)
+        special = _is_special(folder_name)
+        images = _collect_images(d)
+        already_done = (output_dir.is_dir() and 
+                        _pdf_already_exists(output_dir, order_id, folder_name, special))
+        orders.append({
+            "folder": folder_name,
+            "path": str(d),
+            "variant": variant,
+            "order_id": order_id or "",
+            "photos": len(images),
+            "already_done": already_done,
+            "special": special,
+        })
+
+    return jsonify({
+        "orders": orders,
+        "output_dir": str(output_dir),
+        "total": len(orders),
+    })
+
+
+@polaroid_bp.route("/polaroid/preview-order", methods=["POST"])
+def preview_order():
+    """Return low-res thumbnails + metadata for a single order folder,
+    used to build an interactive preview in the browser."""
+    import traceback
+    data = request.get_json(silent=True) or {}
+    order_path = data.get("order_path", "").strip()
+    if not order_path or not Path(order_path).is_dir():
+        return jsonify({"error": "Order folder not found."}), 400
+
+    try:
+        order_dir = Path(order_path)
+        folder_name = order_dir.name
+        variant = _detect_variant(folder_name)
+        layout_key = _VARIANT_TO_LAYOUT[variant]
+        layout = LAYOUTS[layout_key]
+        ups = _UPS[variant]
+        images = _collect_images(order_dir)
+        num_photos = len(images)
+        num_pdfs = math.ceil(num_photos / ups) if num_photos > 0 else 0
+
+        thumbnails = []
+        for i, img_path in enumerate(images):
+            try:
+                b64, auto_px, auto_py = make_thumbnail(img_path, layout)
+                thumbnails.append({
+                    "index": i,
+                    "filename": Path(img_path).name,
+                    "thumbnail": b64,
+                    "mode": "fill",
+                    "pan_x": auto_px,
+                    "pan_y": auto_py,
+                })
+            except Exception:
+                thumbnails.append({
+                    "index": i,
+                    "filename": Path(img_path).name,
+                    "thumbnail": "",
+                    "mode": "fill",
+                    "pan_x": 0.5,
+                    "pan_y": 0.5,
+                })
+
+        return jsonify({
+            "folder": folder_name,
+            "path": str(order_dir),
+            "variant": variant,
+            "layout_key": layout_key,
+            "cols": layout["cols"],
+            "rows": layout["rows"],
+            "ups": ups,
+            "rotate": layout["rotate"],
+            "photos": num_photos,
+            "num_pdfs": num_pdfs,
+            "thumbnails": thumbnails,
+        })
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"error": f"Preview failed: {exc}"}), 500
+
+
+@polaroid_bp.route("/polaroid/confirm-order", methods=["POST"])
+def confirm_order():
+    """Generate final PDF(s) for a single order with per-image adjustments."""
+    data = request.get_json(silent=True) or {}
+    order_path = data.get("order_path", "").strip()
+    ship_folder = data.get("ship_folder", "").strip()
+    adjustments = data.get("adjustments", [])  # [{mode, pan_x, pan_y}, ...]
+
+    if not order_path or not Path(order_path).is_dir():
+        return jsonify({"error": "Order folder not found."}), 400
+    if not ship_folder or not Path(ship_folder).is_dir():
+        return jsonify({"error": "Ship folder not found."}), 400
+
+    order_dir = Path(order_path)
+    ship_path = Path(ship_folder)
+    folder_name = order_dir.name
+    variant = _detect_variant(folder_name)
+    layout_key = _VARIANT_TO_LAYOUT[variant]
+    layout = LAYOUTS[layout_key]
+    ups = _UPS[variant]
+
+    images = _collect_images(order_dir)
+    if not images:
+        return jsonify({"error": "No images found in order folder."}), 400
+
+    output_dir = _output_folder_for(ship_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    num_photos = len(images)
+    num_pdfs = math.ceil(num_photos / ups)
+    pdf_names = []
+
+    for pi in range(num_pdfs):
+        start_idx = pi * ups
+        end_idx = min(start_idx + ups, num_photos)
+        batch = images[start_idx:end_idx]
+        batch_adj = adjustments[start_idx:end_idx] if adjustments else None
+
+        if num_pdfs == 1:
+            label = folder_name
+            pdf_filename = f"{folder_name}.pdf"
+        else:
+            label = f"{folder_name}-{pi + 1}/{num_pdfs}"
+            pdf_filename = f"{folder_name}-{pi + 1}_{num_pdfs}.pdf"
+
+        pdf_out = str(output_dir / pdf_filename)
+        generate_pdf(batch, pdf_out, label, layout, adjustments=batch_adj)
+        pdf_names.append(pdf_filename)
+
+    log_activity("polaroid", "confirm_order", json.dumps({
+        "folder": folder_name, "variant": variant,
+        "photos": num_photos, "pdfs": num_pdfs,
+    }))
+
+    return jsonify({
+        "ok": True,
+        "folder": folder_name,
+        "pdfs": pdf_names,
+        "output_dir": str(output_dir),
+    })
+
 
 # --- Order Search (cancelled-order lookup) -----------------------
 
@@ -421,4 +624,102 @@ def order_search():
             "input_folders": found_input,
             "output_pdfs": found_output,
         },
+    })
+_CLEAN_BLACKLIST_WORDS = ["note:", "pixluv"]
+
+@polaroid_bp.route("/polaroid/clean-orders", methods=["POST"])
+def clean_orders():
+    """Scan every order folder inside the selected ship folder and delete
+    any file that is NOT an image, plus any image whose filename or
+    visible text (via OCR) contains 'Note:' or 'PIXLUV' (case-insensitive).
+    OCR runs in parallel across threads for speed."""
+    data = request.get_json(silent=True) or {}
+    ship_folder = data.get("ship_folder", "").strip()
+    if not ship_folder or not Path(ship_folder).is_dir():
+        return jsonify({"error": "Ship folder not found."}), 400
+
+    ship_path = Path(ship_folder)
+    deleted_files: list[dict] = []
+    folders_with_deletes: set[str] = set()
+
+    # --- Pass 1: fast checks (filename + extension) ---
+    quick_deletes: list[tuple[Path, str, str]] = []  # (path, folder, reason)
+    ocr_candidates: list[tuple[Path, str]] = []      # (path, folder)
+
+    for d in sorted(ship_path.iterdir(), key=lambda x: x.name.lower()):
+        if not d.is_dir():
+            continue
+        for f in list(d.iterdir()):
+            if not f.is_file():
+                continue
+            fname_lower = f.name.lower()
+            ext = f.suffix.lower()
+
+            if ext not in SUPPORTED_EXTENSIONS:
+                quick_deletes.append((f, d.name, f"non-image ({ext})"))
+                continue
+
+            # Check filename for blacklisted words
+            hit = None
+            for word in _CLEAN_BLACKLIST_WORDS:
+                if word in fname_lower:
+                    hit = word
+                    break
+            if hit:
+                quick_deletes.append((f, d.name, f"filename contains '{hit}'"))
+            else:
+                ocr_candidates.append((f, d.name))
+
+    # Delete quick matches immediately
+    for fpath, folder, reason in quick_deletes:
+        try:
+            fpath.unlink()
+            deleted_files.append({"folder": folder, "file": fpath.name, "reason": reason})
+            folders_with_deletes.add(folder)
+        except OSError:
+            pass
+
+    # --- Pass 2: parallel OCR on remaining images ---
+    ocr_scanned = len(ocr_candidates)
+    ocr_deletes: list[tuple[Path, str, str]] = []
+
+    if ocr_candidates and _get_ocr() and _get_ocr() is not False:
+        workers = min(os.cpu_count() or 4, 8, len(ocr_candidates))
+
+        def _scan(item):
+            fpath, folder = item
+            hit = _ocr_contains_blacklist(fpath, _CLEAN_BLACKLIST_WORDS)
+            if hit:
+                return (fpath, folder, f"OCR detected '{hit}' in image")
+            return None
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for result in pool.map(_scan, ocr_candidates):
+                if result:
+                    ocr_deletes.append(result)
+
+    # Delete OCR-flagged files
+    for fpath, folder, reason in ocr_deletes:
+        try:
+            fpath.unlink()
+            deleted_files.append({"folder": folder, "file": fpath.name, "reason": reason})
+            folders_with_deletes.add(folder)
+        except OSError:
+            pass
+
+    total_deleted = len(deleted_files)
+    folders_cleaned = len(folders_with_deletes)
+
+    log_activity("polaroid", "clean_orders", json.dumps({
+        "ship_folder": ship_folder,
+        "folders_cleaned": folders_cleaned,
+        "total_deleted": total_deleted,
+        "ocr_scanned": ocr_scanned,
+    }))
+
+    return jsonify({
+        "folders_cleaned": folders_cleaned,
+        "total_deleted": total_deleted,
+        "ocr_scanned": ocr_scanned,
+        "deleted_files": deleted_files,
     })
