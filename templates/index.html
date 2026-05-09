@@ -651,10 +651,73 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <div>
       <button id="m5Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
     </div>
-    <div>
-      <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+   <div>
+            <button id="m5ExtractBtn" class="btn btn-primary" disabled>&#128230; Extract Images</button>
+        </div>
+        <div>
+            <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+        </div>
     </div>
-  </div>
+
+    <div class="progress-section" id="m5ExtProgress">
+        <div class="stage-timeline" id="m5ExtStages">
+            <span class="stage-chip" data-stage="scan">Scan</span>
+            <span class="stage-chip" data-stage="extract">Extract &amp; Cleanup</span>
+            <span class="stage-chip" data-stage="ocr">OCR Check</span>
+            <span class="stage-chip" data-stage="report">Report</span>
+            <span class="stage-chip" data-stage="done">Done</span>
+        </div>
+        <div style="margin-top:14px;">
+            <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" id="m5ExtBar"></div>
+                <div class="progress-pct" id="m5ExtPct">0%</div>
+            </div>
+        </div>
+        <div class="progress-meta">
+            <div class="progress-stage">
+                <div class="stage-dot" id="m5ExtDot"></div>
+                <span id="m5ExtStageLabel">Starting...</span>
+            </div>
+            <span id="m5ExtEta"></span>
+        </div>
+        <div class="progress-detail" id="m5ExtDetail"></div>
+        <div id="m5ExtOrderCurrent" style="margin-top:10px; font-size:.85rem; color: #c4b5fd; font-weight:600; display:none;"></div>
+    </div>
+
+    <div class="summary-card" id="m5ExtSummary">
+        <h4>&#10003; Extract Image Completed</h4>
+        <div class="summary-grid">
+            <div class="summary-item">Total orders: <span id="m5ExtSumOrders">-</span></div>
+            <div class="summary-item">Total images: <span id="m5ExtSumImages">-</span></div>
+            <div class="summary-item">Zips extracted: <span id="m5ExtSumZips">-</span></div>
+            <div class="summary-item">Files deleted: <span id="m5ExtSumDeleted">-</span></div>
+            <div class="summary-item">OCR removed: <span id="m5ExtSumOcr">-</span></div>
+            <div class="summary-item">Time: <span id="m5ExtSumTime">-</span></div>
+            <div class="summary-item" style="grid-column:span 2;">Report: <span id="m5ExtSumReport">-</span></div>
+        </div>
+    </div>
+
+    <div class="table-section" id="m5ExtTable">
+        <div class="table-title">
+            Extract Image Results
+            <span class="count-badge" id="m5ExtCount">0</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Folder</th>
+                        <th>Order ID</th>
+                        <th>Images</th>
+                        <th>Zip</th>
+                        <th>OCR Removed</th>
+                    </tr>
+                </thead>
+                <tbody id="m5ExtTbody"></tbody>
+            </table>
+        </div>
+    </div>
 
   <div class="progress-section" id="m5Progress">
     <div class="stage-timeline" id="m5Stages">
@@ -1511,6 +1574,7 @@ function enableControls() {
   var $ship       = document.getElementById('m5Ship');
   var $refresh    = document.getElementById('m5Refresh');
   var $runBtn     = document.getElementById('m5RunBtn');
+  var $extractBtn = document.getElementById('m5ExtractBtn');
   var $circle     = document.getElementById('m5Circle');
   var $pill       = document.getElementById('m5Pill');
   var $progress   = document.getElementById('m5Progress');
@@ -1640,6 +1704,7 @@ function enableControls() {
 
   $ship.addEventListener('change', function () {
     $runBtn.disabled = !this.value;
+    $extractBtn.disabled = !this.value;
   });
 
   /* --- Start bulk processing --- */
@@ -1772,9 +1837,194 @@ function enableControls() {
 }
 
 function enableControls() {
-  $runBtn.disabled = !$ship.value;
-  $ship.disabled = false;
-  $refresh.disabled = false;
+    $runBtn.disabled = !$ship.value;
+    $extractBtn.disabled = !$ship.value;
+    $ship.disabled = false;
+    $refresh.disabled = false;
+}
+
+// --- Extract Image ----------------------------------------------------
+var EXT_STAGES = ['scan','extract','ocr','report','done'];
+var $extProgress  = document.getElementById('m5ExtProgress');
+var $extBar       = document.getElementById('m5ExtBar');
+var $extPct       = document.getElementById('m5ExtPct');
+var $extDot       = document.getElementById('m5ExtDot');
+var $extStage     = document.getElementById('m5ExtStageLabel');
+var $extEta       = document.getElementById('m5ExtEta');
+var $extDetail    = document.getElementById('m5ExtDetail');
+var $extOrderCur  = document.getElementById('m5ExtOrderCurrent');
+var $extSummary   = document.getElementById('m5ExtSummary');
+var $extTable     = document.getElementById('m5ExtTable');
+var $extTbody     = document.getElementById('m5ExtTbody');
+var $extCount     = document.getElementById('m5ExtCount');
+var extCompletedStages = new Set();
+
+function setExtChip(name, state) {
+    document.querySelectorAll('#m5ExtStages .stage-chip').forEach(function (c) {
+        if (c.dataset.stage === name) {
+            c.classList.remove('active','completed','errored');
+            c.classList.add(state);
+        }
+    });
+}
+
+function markExtPrior(cur) {
+    var idx = EXT_STAGES.indexOf(cur);
+    for (var i = 0; i < idx; i++) {
+        if (!extCompletedStages.has(EXT_STAGES[i])) {
+            extCompletedStages.add(EXT_STAGES[i]);
+            setExtChip(EXT_STAGES[i], 'completed');
+        }
+    }
+}
+
+function resetExtract() {
+    $extProgress.classList.remove('visible');
+    $extSummary.classList.remove('visible');
+    $extTable.classList.remove('visible');
+    $extBar.style.width = '0%';
+    $extBar.classList.remove('done','error');
+    $extPct.textContent = '0%';
+    $extDot.classList.remove('done','error');
+    $extStage.textContent = 'Starting...';
+    $extEta.textContent = '';
+    $extDetail.textContent = '';
+    $extOrderCur.style.display = 'none';
+    $extOrderCur.textContent = '';
+    $extTbody.innerHTML = '';
+    $extCount.textContent = '0';
+    extCompletedStages = new Set();
+    document.querySelectorAll('#m5ExtStages .stage-chip').forEach(function (c) {
+        c.classList.remove('active','completed','errored');
+    });
+}
+
+$extractBtn.addEventListener('click', function () {
+    var shipFolder = $ship.value;
+    if (!shipFolder) return;
+
+    resetExtract();
+    $extractBtn.disabled = true;
+        $runBtn.disabled = true;
+    $ship.disabled = true;
+    $refresh.disabled = true;
+    $pill.className = 'status-pill pill-running';
+    $pill.innerHTML = '&#9679; Extracting';
+    $extProgress.classList.add('visible');
+
+    fetch('/polaroid/extract-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (data.error) {
+            alert(data.error);
+            resetExtract();
+            enableControls();
+            return;
+        }
+        subscribeExtract(data.task_id);
+    })
+    .catch(function (err) {
+        alert('Request failed: ' + err.message);
+        enableControls();
+    });
+});
+
+function subscribeExtract(taskId) {
+    var es = new EventSource('/polaroid/extract-progress/' + encodeURIComponent(taskId));
+
+    es.onmessage = function (ev) {
+        var d = JSON.parse(ev.data);
+
+        if (d.error) {
+            es.close();
+            $extBar.style.width = '100%';
+            $extBar.classList.add('error');
+            $extPct.textContent = 'Error';
+            $extDot.classList.add('error');
+            $extStage.textContent = 'Failed';
+            $extDetail.textContent = d.error;
+            $extEta.textContent = '';
+            setExtChip(d.stage || 'error', 'errored');
+            $pill.className = 'status-pill';
+            $pill.style.background = 'rgba(239,68,68,0.15)';
+            $pill.style.color = '#f87171';
+            $pill.textContent = 'Error';
+            enableControls();
+            return;
+        }
+
+        var pct = Math.min(d.pct, 100);
+        $extBar.style.width = pct + '%';
+        $extPct.textContent = pct + '%';
+        $extStage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+        $extDetail.textContent = d.detail || '';
+
+        if (d.order_name) {
+            $extOrderCur.style.display = 'block';
+            $extOrderCur.textContent = '📁 ' + d.order_name +
+                (d.order_total ? ' (' + (d.order_index + 1) + '/' + d.order_total + ')' : '');
+        }
+
+        markExtPrior(d.stage);
+        if (!d.done) setExtChip(d.stage, 'active');
+
+                if (d.done) {
+            es.close();
+            extCompletedStages.add(d.stage);
+            EXT_STAGES.forEach(function (s) { setExtChip(s, 'completed'); });
+            $extBar.classList.add('done');
+            $extDot.classList.add('done');
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; Done';
+            $extOrderCur.style.display = 'none';
+
+            if (d.result) {
+                var r = d.result;
+                document.getElementById('m5ExtSumOrders').textContent = r.total_orders;
+                document.getElementById('m5ExtSumImages').textContent = r.total_images;
+                document.getElementById('m5ExtSumZips').textContent = r.zips_extracted;
+                document.getElementById('m5ExtSumDeleted').textContent = r.files_deleted;
+                document.getElementById('m5ExtSumOcr').textContent = r.ocr_removed;
+                document.getElementById('m5ExtSumTime').textContent = r.elapsed + 's';
+                document.getElementById('m5ExtSumReport').textContent = r.report_path;
+                $extSummary.classList.add('visible');
+
+                if (r.orders && r.orders.length) {
+                    $extCount.textContent = r.orders.length;
+                    $extTbody.innerHTML = r.orders.map(function (o, i) {
+                        var zipTag = o.extracted_zip
+                            ? '<span class="tag" style="background:rgba(34,197,94,.15);color:#4ade80;">Yes</span>'
+                            : '<span class="tag" style="background:rgba(255,255,255,.05);color:#666;">No</span>';
+                        var ocrCount = o.ocr_removed ? o.ocr_removed.length : 0;
+                        var ocrTag = ocrCount > 0
+                            ? '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + ocrCount + ' removed</span>'
+                            : '<span class="tag" style="background:rgba(255,255,255,.05);color:#666;">0</span>';
+                        return '<tr>' +
+                            '<td>' + (i + 1) + '</td>' +
+                            '<td><span class="code-name">' + escHS(o.folder) + '</span></td>' +
+                            '<td><span class="tag tag-id">' + escHS(o.order_id) + '</span></td>' +
+                            '<td>' + o.final_count + '</td>' +
+                            '<td>' + zipTag + '</td>' +
+                            '<td>' + ocrTag + '</td>' +
+                            '</tr>';
+                    }).join('');
+                    $extTable.classList.add('visible');
+                }
+            }
+            enableControls();
+        }
+    };
+
+    es.onerror = function () {
+        es.close();
+        $extStage.textContent = 'Connection lost';
+        $extDot.classList.add('error');
+        enableControls();
+    };
 }
 
 // --- Order Search ----------------------------------------------------

@@ -39,9 +39,11 @@ PAGE_W = 13.0
 PAGE_H = 19.0
 
 CUT_MARK_LEN = 0.25
+INNER_CUT_MARK_LEN = 0.10
 CUT_MARK_THICKNESS = 0.75
 CUT_MARK_COLOR = CMYKColor(0, 0, 0, 1.0)
-
+INNER_CUT_MARK_THICKNESS = 0.4
+INNER_CUT_MARK_COLOR = CMYKColor(0,0,0,0.60)
 LABEL_COLOR = CMYKColor(0, 0, 0, 1.0)
 LABEL_FONT = "Helvetica"
 LABEL_SIZE = 14
@@ -194,14 +196,14 @@ def _create_placeholder(out_path: str, layout: dict) -> None:
     img = img.convert("CMYK")
     img.save(out_path, "JPEG", quality=JPEG_QUALITY)
 
-def _draw_cut_marks(c: canvas.Canvas, layout: dict) -> None:
+def _draw_cut_marks(c: canvas.Canvas, layout: dict, layout_key:str = "") -> None:
     c.setStrokeColor(CUT_MARK_COLOR)
     c.setLineWidth(CUT_MARK_THICKNESS)
     cols, rows = layout["cols"], layout["rows"]
     cell_w, cell_h = layout["cell_w"], layout["cell_h"]
     grid_left, grid_bottom = layout["grid_left"], layout["grid_bottom"]
     mark = CUT_MARK_LEN * inch
-
+    inner = INNER_CUT_MARK_LEN * inch
     grid_right = grid_left + cols * cell_w
     grid_top = grid_bottom + rows * cell_h
     for row in range(rows + 1):
@@ -216,6 +218,17 @@ def _draw_cut_marks(c: canvas.Canvas, layout: dict) -> None:
         ty = grid_top * inch
         c.line(x, by - mark, x, by)
         c.line(x, ty, x, ty + mark)
+    # Inner cut marks for 3x3 and 3x2 variants
+    if layout_key.startswith("3x3") or layout_key.startswith("3x2"):
+        c.setStrokeColor(INNER_CUT_MARK_COLOR)
+        c.setLineWidth(INNER_CUT_MARK_THICKNESS)
+    # Interior intersections: small cross marks
+        for col in range(1, cols):
+            for row in range(1, rows):
+                x = (grid_left + col * cell_w) * inch
+                y = (grid_bottom + row * cell_h) * inch
+                c.line(x - inner, y, x + inner, y)   # horizontal
+                c.line(x, y - inner, x, y + inner)   # vertical
 
 
 def _draw_order_label(c: canvas.Canvas, order_name: str, label_y: float) -> None:
@@ -223,7 +236,7 @@ def _draw_order_label(c: canvas.Canvas, order_name: str, label_y: float) -> None
     c.setFont(LABEL_FONT, LABEL_SIZE)
     c.drawCentredString((PAGE_W / 2.0) * inch, label_y * inch, order_name)
 
-def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layout: dict) -> None:
+def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layout: dict, layout_key: str = "") -> None:
     tmp_dir = tempfile.mkdtemp(prefix="basa_web_")
     tmp_files: list[str] = []
 
@@ -267,7 +280,7 @@ def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layo
                         width=photo_w * inch, height=photo_h * inch,
                         preserveAspectRatio=True)
 
-        _draw_cut_marks(c, layout)
+        _draw_cut_marks(c, layout,layout_key)
         _draw_order_label(c, order_name, layout["label_y"])
         c.save()
     
@@ -329,7 +342,7 @@ def generate():
             return jsonify({"error": "Failed to save uploaded files"}), 500
 
         pdf_path = os.path.join(work_dir, f"{order_name}.pdf")
-        generate_pdf(saved_paths, pdf_path, order_name, layout)
+        generate_pdf(saved_paths, pdf_path, order_name, layout,layout_key)
         buf = io.BytesIO()
         with open(pdf_path,"rb") as f:
             buf.write(f.read())
