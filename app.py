@@ -5,7 +5,8 @@ import os
 import re
 import time
 import queue
-
+import logging
+import string as _string
 import threading
 from pathlib import Path
 from collections import OrderedDict
@@ -100,7 +101,410 @@ def _strip_prefix(filename: str) -> str:
 
 def _is_combined(filename: str) -> bool:
     return bool(COMBINED_RE.search(filename))
+_m1_log = logging.getLogger("module1")
+_m1_log.setLevel(logging.INFO)
+if not _m1_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    _m1_log.addHandler(_h)
 
+def _add_index_to_pdfs(folder: Path, sorted_list: list[dict],
+                       q: queue.Queue | None = None) -> dict[str, int]:
+    """Add serial index prefix to the label text inside each sorted PDF.
+
+    Single-order PDF:   "1.name-3637"
+    Multi-part order:   "1.a)name-3637-1/2", "1.b)name-3637-2/2"
+
+    Returns  oid_to_serial  mapping (order_id_4 -> serial int).
+    """
+    # --- group PDFs by order id -----------------------------------------
+    order_groups: dict[str, list[int]] = {}          # oid -> [indices]
+    for i, item in enumerate(sorted_list):
+        oid = item.get("four_digit_id") or f"__unk{i}"
+        order_groups.setdefault(oid, []).append(i)
+
+    # --- assign a unique serial per order id (first-appearance order) ---
+    oid_to_serial: dict[str, int] = {}
+    serial = 0
+    for i in range(len(sorted_list)):
+        oid = sorted_list[i].get("four_digit_id") or f"__unk{i}"
+        if oid not in oid_to_serial:
+            serial += 1
+            oid_to_serial[oid] = serial
+
+    # --- build prefix string for each PDF index -------------------------
+    oid_sub: dict[str, int] = {}                     # tracks sub-letter
+    idx_to_prefix: dict[int, str] = {}
+    for i, item in enumerate(sorted_list):
+        oid = item.get("four_digit_id") or f"__unk{i}"
+        s = oid_to_serial[oid]
+        grp = order_groups[oid]
+        if len(grp) == 1:
+            idx_to_prefix[i] = f"{s}."
+        else:
+            sub = oid_sub.get(oid, 0)
+            letter = _string.ascii_lowercase[sub] if sub < 26 else str(sub)
+            idx_to_prefix[i] = f"{s}.{letter})"
+            oid_sub[oid] = sub + 1
+
+    # --- stamp each PDF -------------------------------------------------
+    total = len(sorted_list)
+    for i, item in enumerate(sorted_list):
+        pdf_path = folder / item["new_name"]
+        if not pdf_path.exists():
+            continue
+        prefix = idx_to_prefix.get(i, "")
+        if not prefix:
+            continue
+
+        doc = None
+        tmp_path = pdf_path.with_suffix(".idx.pdf")
+        try:
+            doc = fitz.open(str(pdf_path))
+            for page in doc:
+                # Find bottom-most text span (the order-name label)
+                td = page.get_text("dict")
+                best_span = None
+                best_y = -1.0
+                for blk in td.get("blocks", []):
+                    if blk.get("type") != 0:
+                        continue
+                    for line in blk.get("lines", []):
+                        for span in line.get("spans", []):
+                            if span["text"].strip() and span["bbox"][3] > best_y:
+                                best_y = span["bbox"][3]
+                                best_span = span
+
+                if not best_span:
+                    continue
+
+                old_text = best_span["text"].strip()
+                new_text = f"{prefix}{old_text}"
+                fs = best_span["size"]
+                bbox = fitz.Rect(best_span["bbox"])
+
+                # white-out old label old_text
+                
+                                # white-out old label text
+                page.draw_rect(bbox + (-2, -1, 2, 1),
+                               color=None, fill=(1, 1, 1))
+
+                # insert new centred text
+                pw = page.rect.width
+                tw = fitz.get_text_length(new_text, fontname="helv",
+                                          fontsize=fs)
+                x = (pw - tw) / 2
+                page.insert_text((x, bbox.y1 - 1), new_text,
+                                 fontsize=fs, fontname="helv",
+                                 color=(0, 0, 0))
+
+            doc.save(str(tmp_path), garbage=0, deflate=False)
+            doc.close()
+            doc = None
+            tmp_path.replace(pdf_path)
+
+            if q:
+                pct = 30 + int((i + 1) / total * 10)
+                _emit(q, stage="index", pct=pct,
+                      detail=f"Indexed {i+1}/{total}: {prefix}{item['new_name']}")
+        except Exception as exc:
+            _m1_log.warning("Index skip %s: %s", item["new_name"], exc)
+            if doc:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    return oid_to_serial
+
+
+def _number_shipping_labels(output_folder: Path,
+                            oid_to_serial: dict[str, int],
+                            q: queue.Queue | None = None) -> dict | None:
+    """Stamp serial numbers on each label inside the shipping-labels PDF.
+
+    Looks for  <output_folder>/label/optimized_shipping_labels.pdf.
+    Returns a result dict with filename and match stats, or None.
+    """
+
+    label_dir = output_folder / "label"
+    label_pdf = label_dir / "optimized_shipping_labels.pdf"
+    if not label_pdf.exists():
+        label_pdf = output_folder / "optimized_shipping_labels.pdf"
+        if not label_pdf.exists():
+            _m1_log.info("No shipping label PDF found in %s or %s",
+                         output_folder / "label", output_folder)
+            return None
+        label_dir = output_folder
+
+    _m1_log.info("Found label PDF: %s", label_pdf)
+
+    # Multiple regex patterns for matching Amazon order IDs
+    # Format: 404 - 3066465 - 3894751 -> last-4 =f 3894
+    amazon_re_strict = re.compile(
+        r"\d{3}\s*[-\u2013]\s*\d{7}\s*[-\u2013]\s*\d{3}(\d{4})"
+    )
+    # OCR-friendly: handles garbled dashes, extra spaces, dots
+    amazon_re_loose = re.compile(
+        r"(\d{3})\s*\S?\s*(\d{7})\s*\S?\s*\d{3}(\d{4})"
+    )
+    # With "Order" anchor (OCR may read "Id" as "ld", "1d", etc.)
+    amazon_re_order = re.compile(
+        r"[Oo]rder\s*[Il1]?[dD]?\s*[:\.]?\s*(\d{3})\s*\S?\s*(\d{7})\s*\S?\s*\d{3}(\d{4})"
+    )
+
+    try:
+        doc = fitz.open(str(label_pdf))
+    except Exception as exc:
+        _m1_log.warning("Cannot open label PDF: %s", exc)
+        return None
+
+    labeled_count = 0
+    total_pages = len(doc)
+
+    matched_oids: set[str] = set()
+    all_label_oids: set[str] = set()
+    unrecognised_labels: list[str] = []
+
+    # Pre-init OCR engine once
+    _ocr_engine = None
+    _np_mod = None
+    try:
+        import numpy as _np_mod
+        from rapidocr_onnxruntime import RapidOCR
+        _ocr_engine = RapidOCR()
+        _m1_log.info("OCR engine initialized for label scanning")
+    except Exception as exc:
+        _m1_log.warning("OCR engine init failed: %s", exc)
+
+    def _find_oid4(text: str) -> str | None:
+        """Try multiple strategies to extract 4-digit order ID from text."""
+        # Strategy 1: "Order Id:" anchor (most reliable with OCR)
+        m = amazon_re_order.search(text)
+        if m:
+            return m.group(3)
+        # Strategy 2: strict 3-7-7 pattern
+        m = amazon_re_strict.search(text)
+        if m:
+            return m.group(1)
+        # Strategy 3: loose 3-7-7 pattern
+        m = amazon_re_loose.search(text)
+        if m:
+            return m.group(3)
+        # Strategy 4: only if "Order" keyword is present somewhere in text,
+        # do a direct lookup of known 4-digit IDs (avoids false matched_oids
+                # on invoices/random text that happen to contain a 4-digit number)
+        if re.search(r"[Oo]rder", text):
+            for known_oid in oid_to_serial:
+                if known_oid in text:
+                    return known_oid
+        return None
+
+    _m1_log.info("Label scan: %d pages, %d known order IDs: %s",
+                 total_pages, len(oid_to_serial), list(oid_to_serial.keys()))
+
+    for page_num in range(total_pages):
+        page = doc[page_num]
+        pw = page.rect.width
+        ph = page.rect.height
+        half_w = pw / 2
+        half_h = ph / 2
+
+        # 4 labels per page: top-left, bottom-left, top-right, bottom-right
+        quadrants = [
+            ("top-left",     fitz.Rect(0,      0,      half_w, half_h)),
+            ("bottom-left",  fitz.Rect(0,      half_h, half_w, ph)),
+            ("top-right",    fitz.Rect(half_w, 0,      pw,     half_h)),
+            ("bottom-right", fitz.Rect(half_w, half_h, pw,     ph)),
+        ]
+
+        for quad_name, clip in quadrants:
+
+            oid4 = None
+            clip_h = clip.y1 - clip.y0
+
+            # --- Strategy A: text extraction ---------
+            text = page.get_text("text", clip=clip).strip()
+            if text:
+                oid4 = _find_oid4(text)
+                if oid4:
+                    _m1_log.info("P%d %s: TEXT match -> %s", page_num+1, quad_name, oid4)
+                else:
+                    _m1_log.info("P%d %s: text found but no ID. Preview: %.100s",
+                                 page_num+1, quad_name, text.replace('\n', ' '))
+
+            # --- Strategy B: OCR on the Order Id region (middle band) -
+            if not oid4 and _ocr_engine is not None:
+                try:
+                    # Focus OCR on the middle section where "Order Id" line is
+                    # (roughly 30%-55% from top of each label quadrant)
+                    ocr_clip = fitz.Rect(
+                        clip.x0, clip.y0 + clip_h * 0.30,
+                        clip.x1, clip.y0 + clip_h * 0.55,
+                    )
+                    pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), clip=ocr_clip)
+                    img = PILImage.open(io.BytesIO(pix.tobytes("png")))
+                    
+                    result, _ = _ocr_engine(_np_mod.array(img))
+                    if result:
+                        ocr_text = " ".join(line[1] for line in result)
+                        oid4 = _find_oid4(ocr_text)
+                        if oid4:
+                            _m1_log.info("P%d %s: OCR-region match -> %s (text: %.80s)",
+                                         page_num+1, quad_name, oid4, ocr_text)
+                except Exception as exc:
+                    _m1_log.warning("P%d %s: OCR-region failed: %s", page_num+1, quad_name, exc)
+
+            # --- Strategy C: OCR on full label quadrant (fallback) -----
+            if not oid4 and _ocr_engine is not None:
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip)
+                    img = PILImage.open(io.BytesIO(pix.tobytes("png")))
+                    
+                    result, _ = _ocr_engine(_np_mod.array(img))
+                    if result:
+                        ocr_text = " ".join(line[1] for line in result)
+                        oid4 = _find_oid4(ocr_text)
+                        if oid4:
+                            _m1_log.info("P%d %s: OCR-full match -> %s",
+                                         page_num+1, quad_name, oid4)
+                        else:
+                            _m1_log.info("P%d %s: OCR-full NO match. Text: %.150s",
+                                             page_num+1, quad_name, ocr_text)
+                    else:
+                        _m1_log.info("P%d %s: OCR returned no results", page_num+1, quad_name)
+                except Exception as exc:
+                    _m1_log.warning("P%d %s: OCR-full failed: %s", page_num+1, quad_name, exc)
+
+            if not oid4:
+                _m1_log.info("P%d %s: UNMATCHED", page_num+1, quad_name)
+                unrecognised_labels.append(f"Page {page_num+1} {quad_name}")
+                continue
+
+            all_label_oids.add(oid4)
+
+            if oid4 not in oid_to_serial:
+                _m1_log.info("P%d %s: found %s but NOT in output PDFs (excess)",
+                             page_num+1, quad_name, oid4)
+                continue
+
+            matched_oids.add(oid4)
+            serial_text = f"[{oid_to_serial[oid4]}]."
+
+            # --- Place serial number at bottom-right of label quadrant -
+            # ATSPL is at the very bottom-right of each label.
+            # Place serial number just above it, near the right edge.
+            x = clip.x1 - 45        # near right edge of label quadrant
+            y = clip.y1 - 35        # just above bottom edge (above ATSPL)
+
+            # Also try text search for ATSPL (works if text layer exists)
+            atspl_hits = page.search_for("ATSPL", clip=clip)
+            if atspl_hits:
+                ar = atspl_hits[0]
+                x = ar.x0
+                y = ar.y0 - 12
+
+            # Draw white background + red serial number
+            serial_fs = 14
+            tw = fitz.get_text_length(serial_text, fontname="helv",
+                                      fontsize=serial_fs)
+            bg = fitz.Rect(x - 2, y - serial_fs - 1, x + tw + 3, y + 3)
+            page.draw_rect(bg, color=None, fill=(1, 1, 1))
+            page.insert_text((x, y), serial_text,
+                             fontsize=serial_fs, fontname="helv",
+                             color=(1, 0, 0))
+            labeled_count += 1
+            _m1_log.info("P%d %s: stamped '%s' for order %s",
+                         page_num+1, quad_name, serial_text, oid4)
+
+        if q:
+            pct = 40 + int((page_num + 1) / total_pages * 8)
+            _emit(q, stage="labels", pct=pct,
+                      detail=f"Labels: page {page_num+1}/{total_pages} "
+                             f"({labeled_count} numbered)")
+
+    if labeled_count == 0:
+        doc.close()
+        return None
+
+    out_name = "numbered_shipping_labels.pdf"
+    out_path = label_dir / out_name
+    try:
+        doc.save(str(out_path))
+    except Exception as exc:
+        _m1_log.warning("Cannot save numbered labels: %s", exc)
+        doc.close()
+        return None
+    doc.close()
+    _m1_log.info("Numbered %d labels -> %s", labeled_count, out_path)
+
+    # --- Build report data ----------------------------------------------
+    output_oids = set(oid_to_serial.keys())
+    missed_oids = output_oids - matched_oids           # in PDFs but no label found
+    excess_oids = all_label_oids - output_oids         # in labels but no output PDF
+
+    report_lines = [
+        "Label Matching Report",
+        "=" * 55,
+        f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Label PDF: {label_pdf.name}",
+        f"Output Folder: {output_folder.name}",
+        "",
+        f"Total labels processed:   {labeled_count}",
+        f"Total output order IDs:   {len(output_oids)}",
+        f"Matched (numbered):       {len(matched_oids)}",
+        f"Missed (no label found):  {len(missed_oids)}",
+        f"Excess (label only):      {len(excess_oids)}",
+        ""
+    ]
+
+    # Matched section
+    report_lines.append("MATCHED ORDERS (serial -> order ID):")
+    report_lines.append("-" * 40)
+    for oid in sorted(matched_oids):
+        report_lines.append(f"  {oid_to_serial[oid]:>3}. -> {oid}")
+    report_lines.append("")
+
+    # Missed section
+    if missed_oids:
+        report_lines.append("MISSED ORDERS (output PDF exists, no matching label):")
+        report_lines.append("-" * 40)
+        for oid in sorted(missed_oids):
+            report_lines.append(f"  {oid_to_serial[oid]:>3}. -> {oid}  ⚠ NO LABEL")
+        report_lines.append("")
+
+    # Excess section
+    if excess_oids:
+        report_lines.append("EXCESS LABELS (label exists, no matching output PDF):")
+        report_lines.append("-" * 40)
+        for oid in sorted(excess_oids):
+            report_lines.append(f"  {oid}  ⚠ NO OUTPUT PDF")
+        report_lines.append("")
+
+    # Unrecognised positions
+    if unrecognised_labels:
+        report_lines.append("UNREADABLE LABEL POSITIONS (could not extract order ID):")
+        report_lines.append("-" * 40)
+        for pos in unrecognised_labels:
+            report_lines.append(f"  {pos}")
+        report_lines.append("")
+
+    report_path = label_dir / "label_report.txt"
+    report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+
+    return {
+        "filename": out_name,
+        "matched": len(matched_oids),
+        "missed": len(missed_oids),
+        "excess": len(excess_oids),
+        "unreadable": len(unrecognised_labels),
+        "report": "label_report.txt",
+    }
+    
 
 def _run_module1(folder_path: str, task_id: str):
     q = _get_progress_queue(task_id)
@@ -194,8 +598,39 @@ def _run_module1(folder_path: str, task_id: str):
 
         _emit(q, stage="rename", pct=30,
               detail=f"All {total} files renamed.")
+        _emit(q, stage="index", pct=30,
+              detail="Adding serial index to PDF labels...")
+        try:
+            oid_to_serial = _add_index_to_pdfs(folder, sorted_list, q)
+            _emit(q, stage="index", pct=40,
+                  detail=f"Indexed {total} PDFs ({len(oid_to_serial)} unique orders).")
+        except Exception as exc:
+            _m1_log.warning("Index stage failed, skipping: %s", exc)
+            oid_to_serial = {}
+            _emit(q, stage="index", pct=40,
+                  detail="Index step skipped (error).")
 
-        _emit(q, stage="combine", pct=30,
+        # --- Stage: number shipping labels ----------------------------------
+        _emit(q, stage="labels", pct=40,
+              detail="Looking for shipping labels...")
+        try:
+            label_result = _number_shipping_labels(folder, oid_to_serial, q)
+            if label_result:
+                _emit(q, stage="labels", pct=48,
+                      detail=f"Created {label_result['filename']} - "
+                             f"matched: {label_result['matched']}, "
+                             f"missed: {label_result['missed']}, "
+                             f"excess: {label_result['excess']}")
+            else:
+                label_result = None
+                _emit(q, stage="labels", pct=48,
+                      detail="No shipping labels found or nothing to number.")
+        except Exception as exc:
+            _m1_log.warning("Labels stage failed, skipping: %s", exc)
+            label_result = None
+            _emit(q, stage="labels", pct=48,
+                  detail="Labels step skipped (error).")
+        _emit(q, stage="combine", pct=48,
               detail="Combining PDFs (lossless)...")
 
         non_4x3_count = sum(1 for item in sorted_list if item["variant"] != "4x3")
@@ -212,7 +647,7 @@ def _run_module1(folder_path: str, task_id: str):
             src_doc.close()
 
             done_count = i + 1
-            pct = 30 + int((done_count / total) * 50)
+            pct = 48 + int((done_count / total) * 32)
             elapsed = time.perf_counter() - t0
             rate = done_count / elapsed if elapsed > 0 else 1
             remaining = (total - done_count) / rate if rate > 0 else 0
