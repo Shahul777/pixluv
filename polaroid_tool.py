@@ -10,21 +10,26 @@ import re
 import threading
 import time
 from pathlib import Path
-
+import tempfile
 from natsort import natsorted
 from flask import Blueprint, Response, jsonify, request
 
 from db import get_setting, set_setting, log_activity
 
 # --- Import image-placement engine from imageplacer.py ---
-from imageplacer import LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf
+from imageplacer import (LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf,prepare_preview,PAGE_W,PAGE_H)
 
 polaroid_bp = Blueprint("polaroid", __name__)
 
 # --- Progress infrastructure (same pattern as Module 1 in app.py) ---
 _pq: dict[str, queue.Queue] = {}
 _pq_lock = threading.Lock()
-
+# --- Preview handshake infrastructure -------------------------
+# Per-task: preview images stored temporarily, and a threading.
+# that the background thread waits on while the user adjusts th
+_preview_data: dict[str, dict] = {}  # task_id -> {images, even
+_preview_lock = threading.Lock()
+_preview_tmp_dirs: dict[str, str] = {}  # task_id -> temp dir pa
 SETTING_BASE_FOLDER = "polaroid_base_folder"
 
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
@@ -221,7 +226,84 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
                     pdf_filename = f"{folder_name}-({pi + 1}_{num_pdfs}).pdf"
 
                 pdf_out = str(output_dir / pdf_filename)
-                generate_pdf(batch, pdf_out, label, layout,layout_key)
+                # --- Preview step: prepare images and wait for user ---
+                preview_items = prepare_preview(batch, layout)
+                preview_dir = tempfile.mkdtemp(prefix="basa_preview_")
+                preview_urls = []
+                preview_overflows = []
+                for pv in preview_items:
+                    fname = f"prev_o{oi}_p{pi}_{pv['index']:02d}.jpg"
+                    pv_path = os.path.join(preview_dir, fname)
+                    pv["img"].save(pv_path, "JPEG", quality=70)
+                    preview_urls.append(f"/polaroid/preview-img/{task_id}/{fname}")
+                    preview_overflows.append({
+                            "index": pv["index"],
+                            "overflow_x": pv["overflow_x"],
+                         "overflow_y": pv["overflow_y"],
+                        })
+
+        # Store preview data and create wait event
+                confirm_event = threading.Event()
+                with _preview_lock:
+                    _preview_tmp_dirs[task_id] = preview_dir
+                    _preview_data[task_id] = {
+                         "event": confirm_event,
+                         "offsets": None,  # will be filled by confirm endpoint
+                         "layout": layout,
+                         "layout_key": layout_key,
+                         "label": label,
+                             "order_name": folder_name,
+                             }
+
+        # Send preview SSE event to frontend
+                _emit(q, stage="preview", pct=10 + int(oi / total_orders * 85),
+                    detail=f"Review: {label}",
+                    done=False, order_index=oi, order_total=total_orders,
+                    order_name=folder_name, status="preview",
+                    preview={
+                        "images": preview_urls,
+                        "overflows": preview_overflows,
+                        "label": label,
+                        "pdf_index": pi,
+                        "pdf_total": num_pdfs,
+                        "variant": variant,
+                        "cols": layout["cols"],
+                        "rows": layout["rows"],
+                        "cell_w": layout["cell_w"],
+                        "cell_h": layout["cell_h"],
+                        "photo_w": layout["photo_w"],
+                        "photo_h": layout["photo_h"],
+                        "grid_left": layout["grid_left"],
+                        "grid_bottom": layout["grid_bottom"],
+                        "offset_x": layout["offset_x"],
+                        "offset_y": layout["offset_y"],
+                        "page_w": PAGE_W,
+                        "page_h": PAGE_H,
+                        "frame_w_px": layout["frame_w_px"],
+                        "frame_h_px": layout["frame_h_px"],
+                        "num_images": len(batch),
+                    })
+
+        # Wait for user confirmation (no timeout - user takes as long as needed)
+                confirm_event.wait()
+
+        # Retrieve offsets from user
+                with _preview_lock:
+                    user_offsets = _preview_data.get(task_id, {}).get("offsets")
+            # Cleanup preview data
+                    _preview_data.pop(task_id, None)
+
+        # Clean up preview temp dir
+                try:
+                    shutil.rmtree(preview_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                with _preview_lock:
+                    _preview_tmp_dirs.pop(task_id, None)
+
+        # Generate final PDF with user-adjusted offsets
+                generate_pdf(batch, pdf_out, label, layout, layout_key,
+                                offsets=user_offsets)
                 pdf_count += 1
 
                 # Sub-progress within order
@@ -426,7 +508,42 @@ def order_search():
             "output_pdfs": found_output,
         },
     })
+@polaroid_bp.route("/polaroid/preview-img/<task_id>/<filename>")
+def serve_preview_image(task_id: str, filename: str):
+    """Serve a temporary preview image to the browser."""
+    with _preview_lock:
+        tmp_dir = _preview_tmp_dirs.get(task_id)
+    if not tmp_dir:
+        return "Not found", 404
+    # Sanitise filename
+    safe = os.path.basename(filename)
+    fpath = os.path.join(tmp_dir, safe)
+    if not os.path.isfile(fpath):
+        return "Not found", 404
+    from flask import send_file as _sf
+    resp = _sf(fpath, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
 
+@polaroid_bp.route("/polaroid/preview-confirm/<task_id>", methods=["POST"])
+def confirm_preview(task_id: str):
+    """User confirms the preview with optional per-image offsets.
+
+    Body JSON: `{"offsets": [{"x": 0.5, "y": 0.3}, ...]}`
+    Each offset is 0.0..1.0 controlling the crop anchor.
+    """
+    data = request.get_json(silent=True) or {}
+    offsets = data.get("offsets")  # list[{x, y}] or None
+
+    with _preview_lock:
+        pd = _preview_data.get(task_id)
+    if not pd:
+        return jsonify({"error": "No pending preview for this task."}), 404
+
+    pd["offsets"] = offsets
+    pd["event"].set()  # unblock the background thread
+
+    return jsonify({"ok": True})
 _log = logging.getLogger("extract-image")
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".heic", ".heif", ".webp"}
 

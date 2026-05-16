@@ -118,7 +118,23 @@ def _flatten_alpha(img: Image.Image) -> Image.Image:
             background.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[3])
         return background
     return img
-
+def _fill_frame(img: Image.Image, frame_w: int, frame_h: int,
+                offset_x: float = 0.5, offset_y: float = 0.5) -> Image.Image:
+    """Scale image to *cover* the frame (no white bars), then crop.
+    
+    offset_x / offset_y are 0.0..1.0 controlling where the crop window
+    sits on the oversized axis (0.5 = centre, 0.0 = left/top, 1.0 = right/bottom).
+    """
+    img_w, img_h = img.size
+    scale = max(frame_w / img_w, frame_h / img_h)
+    new_w = round(img_w * scale)
+    new_h = round(img_h * scale)
+    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    # Crop from the oversized image using the offset
+    crop_x = round((new_w - frame_w) * max(0.0, min(1.0, offset_x)))
+    crop_y = round((new_h - frame_h) * max(0.0, min(1.0, offset_y)))
+    img = img.crop((crop_x, crop_y, crop_x + frame_w, crop_y + frame_h))
+    return img
 def _fit_to_frame(img: Image.Image, frame_w: int, frame_h: int) -> Image.Image:
     img_w, img_h = img.size
     scale = min(frame_w / img_w, frame_h / img_h)
@@ -126,9 +142,9 @@ def _fit_to_frame(img: Image.Image, frame_w: int, frame_h: int) -> Image.Image:
     new_h = round(img_h * scale)
     img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
     background = Image.new("RGB", (frame_w, frame_h), (255, 255, 255))
-    offset_x = (frame_w - new_w) // 2
-    offset_y = (frame_h - new_h) // 2
-    background.paste(img, (offset_x, offset_y))
+    off_x = (frame_w - new_w) // 2
+    off_y = (frame_h - new_h) // 2
+    background.paste(img, (off_x, off_y))
     return background
 
 def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
@@ -165,7 +181,8 @@ def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
     else:
         log.warning(f"ICC profile '{cmyk_profile_path}' not found in script directory. Using naive conversion.")
         return img.convert("CMYK")
-def process_image(filepath: str, out_path: str, layout: dict) -> None:
+def process_image(filepath: str, out_path: str, layout: dict,
+offset_x:float = 0.5,offset_y: float = 0.5,mode: str = "fill") -> None:
     img = Image.open(filepath)
     img = _apply_exif_orientation(img)
     img = _flatten_alpha(img)
@@ -175,10 +192,20 @@ def process_image(filepath: str, out_path: str, layout: dict) -> None:
         w, h = img.size
         if w > h:
             img = img.rotate(-90, expand=True)
-        img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        if mode == "fit":
+            img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        else:
+            fill_ox = offset_y
+            fill_oy = 1.0 - offset_x
+            img = _fill_frame(img, layout["frame_w_px"], layout["frame_h_px"],
+                              fill_ox, fill_oy)
         img = img.rotate(-90, expand=True)
     else:
-        img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        if mode == "fit":
+            img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
+        else:
+            img = _fill_frame(img, layout["frame_w_px"], layout["frame_h_px"],
+                              offset_x, offset_y)
         
  
     # ------------------------------
@@ -236,7 +263,8 @@ def _draw_order_label(c: canvas.Canvas, order_name: str, label_y: float) -> None
     c.setFont(LABEL_FONT, LABEL_SIZE)
     c.drawCentredString((PAGE_W / 2.0) * inch, label_y * inch, order_name)
 
-def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layout: dict, layout_key: str = "") -> None:
+def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layout: dict, layout_key: str = "",
+offsets: list[dict] | None = None) -> None:
     tmp_dir = tempfile.mkdtemp(prefix="basa_web_")
     tmp_files: list[str] = []
 
@@ -252,7 +280,11 @@ def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layo
         for idx, src in enumerate(image_paths):
             try:
                 tmp_path = os.path.join(tmp_dir, f"img_{idx:02d}.jpg")
-                process_image(src, tmp_path, layout)
+                off = (offsets[idx] if offsets and idx < len(offsets)
+                   else {"x": 0.5, "y": 0.5, "mode": "fill"})
+                process_image(src, tmp_path, layout,
+                          off.get("x", 0.5), off.get("y", 0.5),
+                          mode=off.get("mode", "fill"))
                 tmp_files.append(tmp_path)
                 processed.append(tmp_path)
             except Exception:
@@ -294,7 +326,64 @@ def generate_pdf(image_paths: list[str], output_path: str, order_name: str, layo
             os.rmdir(tmp_dir)
         except OSError:
             pass
+def prepare_preview(image_paths: list[str], layout: dict,
+                    max_cell_px: int = 200) -> list[dict]:
 
+    fw, fh = layout["frame_w_px"], layout["frame_h_px"]
+    results = []
+    for idx, src in enumerate(image_paths):
+        try:
+            img = Image.open(src)
+            img = _apply_exif_orientation(img)
+            img = _flatten_alpha(img)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            if layout["rotate"]:
+                w, h = img.size
+                if w > h:
+                    img = img.rotate(-90, expand=True)
+
+            # --- Compute overflow at full resolution (for ratio) ---
+            img_w, img_h = img.size
+            scale = max(fw / img_w, fh / img_h)
+            full_w = round(img_w * scale)
+            full_h = round(img_h * scale)
+            ov_x_full = full_w - fw  # overflow in full-res pixels
+            ov_y_full = full_h - fh
+
+            # --- Downsample to thumbnail size ---
+            # Determine the thumbnail frame size (the visible area)
+            if layout["rotate"]:
+                # After -90° rotation: displayed frame is fh x fw
+                disp_w, disp_h = fh, fw
+            else:
+                disp_w, disp_h = fw, fh
+            thumb_scale = min(max_cell_px / disp_w, max_cell_px / disp_h)
+            if thumb_scale >= 1.0:
+                thumb_scale = 1.0  # don't upscale
+
+            # Scale the oversized image down to thumbnail proportions
+            thumb_w = round(full_w * thumb_scale)
+            thumb_h = round(full_h * thumb_scale)
+            img = img.resize((thumb_w, thumb_h), Image.Resampling.LANCZOS)
+            thumb_frame_w = round(fw * thumb_scale)
+            thumb_frame_h = round(fh * thumb_scale)
+            overflow_x = thumb_w - thumb_frame_w
+            overflow_y = thumb_h - thumb_frame_h
+
+            if layout["rotate"]:
+                img = img.rotate(-90, expand=True)
+                overflow_x, overflow_y = overflow_y, overflow_x
+
+            results.append({
+                "index": idx,
+                "img": img,
+                "overflow_x": overflow_x,
+                "overflow_y": overflow_y,
+            })
+        except Exception:
+            log.exception("Preview: skipping corrupted image %s", src)
+    return results
 @app.route("/")
 def index():
     return render_template("index.html", layouts=LAYOUTS)

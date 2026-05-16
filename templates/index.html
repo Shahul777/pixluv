@@ -726,6 +726,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
       <span class="stage-chip" data-stage="scan">Scan</span>
       <span class="stage-chip" data-stage="prepare">Prepare</span>
       <span class="stage-chip" data-stage="process">Process</span>
+      <span class="stage-chip" data-stage="preview">Preview</span>
       <span class="stage-chip" data-stage="done">Done</span>
     </div>
 
@@ -914,7 +915,181 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     </div>
   </div>
 </div>
+<div id="previewOverlay" class="pv-overlay" style="display:none;">
+  <div class="pv-header">
+    <div class="pv-title">
+      <span id="pvOrderName">Order Preview</span>
+      <span class="pv-sub" id="pvPdfLabel">PDF 1/1</span>
+    </div>
+    <div class="pv-actions">
+      <button id="pvResetBtn" class="btn btn-outline pv-btn" title="Reset all to centre">&#8634; Reset</button>
+      <button id="pvSaveBtn" class="btn btn-success pv-btn">&#10003; Save &amp; Continue</button>
+    </div>
+  </div>
+  <div class="pv-body">
+    <div class="pv-sheet-wrap">
+      <div id="pvSheet" class="pv-sheet">
+        <!-- cells are injected here by JS -->
+      </div>
+    </div>
+    <!-- Loading spinner between orders -->
+    <div id="pvLoader" class="pv-loader" style="display:none;">
+      <div class="pv-spinner"></div>
+      <div class="pv-loader-text" id="pvLoaderText">Generating PDF &amp; loading next order...</div>
+    </div>
+    <div class="pv-info">
+      <span id="pvHint">Click an image to see the full photo, then drag to adjust crop</span>
+    </div>
+  </div>
+</div>
 
+<style>
+/* --- Preview overlay ---------------------------------------------------- */
+.pv-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(10, 10, 20, 0.97);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pv-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 24px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.pv-title { display: flex; align-items: center; gap: 12px; }
+.pv-title span:first-child {
+  font-size: 1.1rem; font-weight: 700; color: #f0f0f0;
+}
+.pv-sub {
+  font-size: .78rem; color: #888;
+  padding: 2px 10px; border-radius: 12px;
+  background: rgba(124,58,237,0.15);
+}
+.pv-actions { display: flex; gap: 10px; }
+.pv-btn { padding: 8px 20px; font-size: .82rem; }
+
+.pv-body {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  overflow: auto; padding: 16px;
+}
+.pv-sheet-wrap {
+  display: flex; align-items: center; justify-content: center;
+  flex: 1; width: 100%;
+}
+.pv-sheet {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  /* dimensions set by JS based on layout */
+}
+.pv-cell {
+  position: absolute;
+  overflow: hidden;
+  cursor: grab;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #f0f0f0;
+  transition: box-shadow .2s;
+}
+.pv-cell:active { cursor: grabbing; }
+.pv-cell img {
+  position: absolute;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+/* --- Active cell: show full image with dimmed overflow --- */
+.pv-cell.pv-active {
+  overflow: visible;
+  z-index: 8;
+  border-color: rgba(124,58,237,0.7);
+  box-shadow: 0 0 2px rgba(124,58,237,0.5);
+}
+.pv-cell.pv-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.pv-cell.pv-active img {
+  opacity: 0.35;
+  z-index: 0;
+}
+.pv-cell .pv-bright-clone {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+}
+.pv-cell.pv-active .pv-bright-clone {
+  display: block;
+}
+.pv-cell .pv-bright-clone img {
+  position: absolute;
+  opacity: 1;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+.pv-cell-index {
+  position: absolute; top: 2px; left: 4px;
+  font-size: 9px; color: rgba(0,0,0,0.35);
+  font-weight: 700; z-index: 4;
+  pointer-events: none;
+}
+.pv-label {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 10px; color: #000; font-weight: 600;
+  white-space: nowrap; pointer-events: none;
+}
+.pv-cutmark {
+  position: absolute; background: #000;
+}
+.pv-info {
+  flex-shrink: 0; padding: 8px 0;
+  font-size: .78rem; color: #777; text-align: center;
+}
+.pv-toggle {
+  position: absolute; bottom: 3px; right: 3px; z-index: 3;
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 8px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; cursor: pointer; border: none;
+  transition: background .15s, color .15s;
+  pointer-events: auto;
+}
+.pv-toggle.fill {
+  background: rgba(124,58,237,0.8); color: #fff;
+}
+.pv-toggle.fit {
+  background: rgba(234,179,8,0.85); color: #000;
+}
+/* Loader between orders */
+.pv-loader {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(10, 10, 20, 0.88);
+}
+.pv-spinner {
+  width: 48px; height: 48px; border-radius: 50%;
+  border: 4px solid rgba(124,58,237,0.2);
+  border-top-color: #a78bfa;
+  animation: pvSpin 0.8s linear infinite;
+}
+@keyframes pvSpin { to { transform: rotate(360deg); } }
+.pv-loader-text {
+  margin-top: 16px; font-size: .88rem; color: #aaa;
+  font-weight: 500;
+}
+</style>
 
 
 <script>
@@ -1569,7 +1744,7 @@ function enableControls() {
 </script>
 <script>
 (function () {
-  var M5_STAGES = ['scan','prepare','process','done'];
+  var M5_STAGES = ['scan','prepare','process','preview','done'];
 
   var $base       = document.getElementById('m5Base');
   var $saveBase   = document.getElementById('m5SaveBase');
@@ -1786,6 +1961,18 @@ function enableControls() {
       markPrior(d.stage);
       if (!d.done) setChip(d.stage, 'active');
 
+// — Preview event: show overlay —
+if (d.stage === 'preview' && d.preview) {
+    window._pvCurrentTaskId = taskId;
+    window._pvShowPreview(d.preview, taskId);
+}
+
+// — Hide preview overlay when pipeline finishes or moves past preview —
+if (d.done || (d.stage === 'done')) {
+    window._pvHideOverlay && window._pvHideOverlay();
+}
+
+
       if (d.done) {
         es.close();
         completedStages.add(d.stage);
@@ -1955,6 +2142,7 @@ function subscribeExtract(taskId) {
             $pill.style.background = 'rgba(239,68,68,0.15)';
             $pill.style.color = '#f87171';
             $pill.textContent = 'Error';
+            window._pvHideOverlay && window._pvHideOverlay();
             enableControls();
             return;
         }
@@ -2109,6 +2297,549 @@ $searchId.addEventListener('keydown', function (e) {
   if (e.key === 'Enter') { e.preventDefault(); $searchBtn.click(); }
 });
 })();
+</script>
+
+<!-- ========================== PREVIEW OVERLAY JS ========================== -->
+<script>
+(function () {
+  var $overlay   = document.getElementById('previewOverlay');
+  var $sheet     = document.getElementById('pvSheet');
+  var $orderName = document.getElementById('pvOrderName');
+  var $pdfLabel  = document.getElementById('pvPdfLabel');
+  var $saveBtn   = document.getElementById('pvSaveBtn');
+  var $resetBtn  = document.getElementById('pvResetBtn');
+  var $hint      = document.getElementById('pvHint');
+  var $loader    = document.getElementById('pvLoader');
+  var $loaderText = document.getElementById('pvLoaderText');
+
+  // State for current preview
+  var _cells = [];        // [{el, imgEl, overflowX, overflowY, offX, offY, index}]
+  var _taskId = null;
+  var _layoutInfo = null;
+  var SCALE = 1;          // px-per-inch scale for on-screen rendering
+  var _rotatedView = false; // true when sheet is shown in landscape
+
+  /**
+   * Hide the preview overlay and clean up.
+   */
+  window._pvHideOverlay = function () {
+    $loader.style.display = 'none';
+    $overlay.style.display = 'none';
+    $sheet.innerHTML = '';
+    $sheet.style.opacity = '1';
+    $sheet.style.transform = 'none';
+    $sheet.style.margin = '0';
+    _cells = [];
+    _activeCell = null;
+  };
+
+  /**
+   * Show the preview overlay.
+   * @param {object} pv - preview data from SSE event
+   * @param {string} taskId - current task id
+   */
+  window._pvShowPreview = function (pv, taskId) {
+    _taskId = taskId;
+    _layoutInfo = pv;
+    _cells = [];
+    _activeCell = null;
+
+    // Hide loader from previous order (if still showing)
+    $loader.style.display = 'none';
+    $sheet.style.opacity = '1';
+    $saveBtn.disabled = false;
+    $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+    $resetBtn.disabled = false;
+
+    $orderName.textContent = pv.label;
+    $pdfLabel.textContent  = 'PDF ' + (pv.pdf_index + 1) + '/' + pv.pdf_total +
+                             ' · ' + pv.variant.toUpperCase();
+
+    // Calculate scale: fit the 13x19 sheet into the viewport
+    // Try both portrait and landscape orientation, pick whichever is bigger
+    var vw = window.innerWidth - 64;
+    var vh = window.innerHeight - 140;
+    var pageW = pv.page_w;
+    var pageH = pv.page_h;
+    var scalePortrait  = Math.min(vw / pageW, vh / pageH);
+    var scaleLandscape = Math.min(vw / pageH, vh / pageW);
+
+    if (scaleLandscape > scalePortrait) {
+      // Landscape view gives a bigger preview
+      SCALE = scaleLandscape;
+      _rotatedView = true;
+    } else {
+      SCALE = scalePortrait;
+      _rotatedView = false;
+    }
+
+    var sheetW = Math.round(pageW * SCALE);
+    
+
+    var sheetH = Math.round(pageH * SCALE);
+    $sheet.style.width = sheetW + 'px';
+    $sheet.style.height = sheetH + 'px';
+    $sheet.innerHTML = '';
+
+    if (_rotatedView) {
+      // Rotate the sheet -90° visually (CW) so it appears landscape
+      $sheet.style.transform = 'rotate(-90deg)';
+      // The rotated element occupies sheetH x sheetW on screen
+      // Adjust the wrapper so it provides correct space
+      $sheet.style.transformOrigin = 'center center';
+      // Use margin to compensate the bounding-box difference
+      var diffW = (sheetH - sheetW) / 2;
+      var diffH = (sheetW - sheetH) / 2;
+      $sheet.style.marginLeft = diffW + 'px';
+      $sheet.style.marginRight = diffW + 'px';
+      $sheet.style.marginTop = diffH + 'px';
+      $sheet.style.marginBottom = diffH + 'px';
+    } else {
+      $sheet.style.transform = 'none';
+      $sheet.style.margin = '0';
+    }
+
+    // Draw cut marks
+    _drawCutMarks(pv, SCALE);
+
+    var labelEl = document.createElement('div');
+    labelEl.className = 'pv-label';
+    labelEl.textContent = pv.label;
+    labelEl.style.bottom = Math.round(pv.grid_bottom * 0.25 * SCALE) + 'px';
+    $sheet.appendChild(labelEl);
+
+    // Create image cells
+    var cols = pv.cols, rows = pv.rows;
+    var cellW = pv.cell_w * SCALE;
+    var cellH = pv.cell_h * SCALE;
+    var photoW = pv.photo_w * SCALE;
+    var photoH = pv.photo_h * SCALE;
+    var gLeft = pv.grid_left * SCALE;
+    var gBottom = pv.grid_bottom * SCALE;
+    var ox = pv.offset_x * SCALE;
+    var oy = pv.offset_y * SCALE;
+
+    // Frame dimensions in pixels (original, before rotation)
+    var fwPx = pv.frame_w_px;
+    var fhPx = pv.frame_h_px;
+
+    for (var i = 0; i < pv.num_images; i++) {
+      var col = i % cols;
+      var rowFromTop = Math.floor(i / cols);
+      var row = (rows - 1) - rowFromTop;
+
+      // Cell position (CSS: top-left origin, PDF uses bottom-left)
+      var cellLeft = gLeft + col * cellW;
+      var cellTop = sheetH - gBottom - (row + 1) * cellH;
+      var photoLeft = cellLeft + ox;
+      var photoTop = cellTop + (cellH - photoH - oy);
+
+      var cellEl = document.createElement('div');
+      cellEl.className = 'pv-cell';
+      cellEl.style.left = Math.round(photoLeft) + 'px';
+      cellEl.style.top = Math.round(photoTop) + 'px';
+      cellEl.style.width = Math.round(photoW) + 'px';
+      cellEl.style.height = Math.round(photoH) + 'px';
+
+      // Index label
+      var idxEl = document.createElement('div');
+      idxEl.className = 'pv-cell-index';
+      idxEl.textContent = (i + 1);
+      cellEl.appendChild(idxEl);
+
+      // Fit/Fill toggle button
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'pv-toggle fill';
+      toggleBtn.textContent = 'Fill';
+      toggleBtn.title = 'Toggle Fit / Fill';
+      cellEl.appendChild(toggleBtn);
+      
+
+      // Image element (oversized, draggable)
+      var imgEl = document.createElement('img');
+      if (pv.images[i]) {
+        imgEl.src = pv.images[i];
+      }
+      cellEl.appendChild(imgEl);
+
+      $sheet.appendChild(cellEl);
+
+      // Overflow info - how much the image extends beyond the frame
+      var ovInfo = pv.overflows[i] || { overflow_x: 0, overflow_y: 0 };
+      var ovX = ovInfo.overflow_x;    // already in thumbnail pixels
+      var ovY = ovInfo.overflow_y;
+
+      // The thumbnail image is already small (max ~200px cell).
+      // We load it at natural size via <img>, then let the browser
+      // scale it to fill the on-screen cell + overflow.
+      // imgEl.onload will set the final display size.
+      var imgDisplayW = Math.round(photoW + ovX * (photoW / Math.max(photoW, 1)));
+      var imgDisplayH = Math.round(photoH + ovY * (photoH / Math.max(photoH, 1)));
+
+      // Wait for image to load, then compute correct display size from
+      // the actual thumbnail dimensions vs the on-screen cell
+      (function (el, cellW_, cellH_, ox_, oy_, idx_) {
+        el.onload = function () {
+          // Thumbnail natural size includes overflow
+          var natW = el.naturalWidth;
+          var natH = el.naturalHeight;
+          // The thumbnail frame (without overflow) is: natW - ovX, natH - ovY
+          var thumbFrameW = natW - ox_;
+          var thumbFrameH = natH - oy_;
+          if (thumbFrameW <= 0) thumbFrameW = natW;
+          if (thumbFrameH <= 0) thumbFrameH = natH;
+          // Scale factor from thumbnail frame to on-screen cell
+          var sx = cellW_ / thumbFrameW;
+          var sy = cellH_ / thumbFrameH;
+          var dw = Math.round(natW * sx);
+          var dh = Math.round(natH * sy);
+          el.style.width = dw + 'px';
+          el.style.height = dh + 'px';
+          var ix = -Math.round((dw - cellW_) / 2);
+          var iy = -Math.round((dh - cellH_) / 2);
+          el.style.left = ix + 'px';
+          el.style.top = iy + 'px';
+          // Update cellData
+          var cd = _cells[idx_];
+          if (cd) {
+            cd.displayW = dw;
+            cd.displayH = dh;
+            cd.fillW = dw;
+            cd.fillH = dh;
+            cd.offX = ix;
+            cd.offY = iy;
+            _syncClone(cd);
+          }
+        };
+      })(imgEl, Math.round(photoW), Math.round(photoH), ovX, ovY, i);
+
+      // Set initial sizes (will be corrected on load)
+      imgEl.style.width = Math.round(photoW) + 'px';
+      imgEl.style.height = Math.round(photoH) + 'px';
+
+      var initX = 0;
+      var initY = 0;
+      imgEl.style.left = '0px';
+      imgEl.style.top = '0px';
+
+      var cellData = {
+        el: cellEl,
+        imgEl: imgEl,
+        toggleBtn: toggleBtn,
+        displayW: Math.round(photoW),
+        displayH: Math.round(photoH),
+        fillW: Math.round(photoW),   // will be set on img load
+        fillH: Math.round(photoH),
+        frameW: Math.round(photoW),
+        frameH: Math.round(photoH),
+        offX: initX,
+                offY: initY,
+        index: i,
+        mode: 'fill',
+      };
+      _cells.push(cellData);
+
+      // Bright clone: a clipped copy of the image shown at full opacity inside the frame
+      var cloneWrap = document.createElement('div');
+      cloneWrap.className = 'pv-bright-clone';
+      var cloneImg = document.createElement('img');
+      cloneImg.src = imgEl.src;
+      cloneWrap.appendChild(cloneImg);
+      cellEl.appendChild(cloneWrap);
+      cellData.cloneImg = cloneImg;
+      cellData.cloneWrap = cloneWrap;
+
+      // Attach drag handler
+      _attachDrag(cellData);
+
+      // Attach toggle handler
+      (function (cd_, btn_) {
+        btn_.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (cd_.mode === 'fill') {
+            // Switch to FIT
+            cd_.mode = 'fit';
+            btn_.className = 'pv-toggle fit';
+            btn_.textContent = 'Fit';
+            // Fit: scale image so it fits inside the frame (show full image)
+            var natW = cd_.imgEl.naturalWidth || cd_.fillW;
+            var natH = cd_.imgEl.naturalHeight || cd_.fillH;
+            var fitScale = Math.min(cd_.frameW / natW, cd_.frameH / natH);
+            var fw = Math.round(natW * fitScale);
+            var fh = Math.round(natH * fitScale);
+            cd_.displayW = fw;
+            cd_.displayH = fh;
+            cd_.offX = Math.round((cd_.frameW - fw) / 2);
+            cd_.offY = Math.round((cd_.frameH - fh) / 2);
+            cd_.imgEl.style.width = fw + 'px';
+            cd_.imgEl.style.height = fh + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            cd_.el.style.cursor = 'default';
+            // Deactivate overflow view in fit mode
+            cd_.el.classList.remove('pv-active');
+            if (_activeCell === cd_) _activeCell = null;
+            _syncClone(cd_);
+          } else {
+            // Switch to FILL
+            cd_.mode = 'fill';
+            btn_.className = 'pv-toggle fill';
+            btn_.textContent = 'Fill';
+            cd_.displayW = cd_.fillW;
+            cd_.displayH = cd_.fillH;
+            cd_.offX = -Math.round((cd_.fillW - cd_.frameW) / 2);
+            cd_.offY = -Math.round((cd_.fillH - cd_.frameH) / 2);
+            cd_.imgEl.style.width = cd_.fillW + 'px';
+            cd_.imgEl.style.height = cd_.fillH + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            cd_.el.style.cursor = 'grab';
+            _syncClone(cd_);
+          }
+        });
+      })(cellData, toggleBtn);
+    }
+
+    // Add placeholders for empty slots
+    for (var j = pv.num_images; j < cols * rows; j++) {
+      var pc = j % cols;
+      var prft = Math.floor(j / cols);
+      var pr = (rows - 1) - prft;
+      var pcLeft = gLeft + pc * cellW;
+      var pcTop = sheetH - gBottom - (pr + 1) * cellH;
+      var ppLeft = pcLeft + ox;
+      var ppTop = pcTop + (cellH - photoH - oy);
+      var phEl = document.createElement('div');
+      phEl.className = 'pv-cell';
+            phEl.style.left = Math.round(ppLeft) + 'px';
+      phEl.style.top = Math.round(ppTop) + 'px';
+      phEl.style.width = Math.round(photoW) + 'px';
+      phEl.style.height = Math.round(photoH) + 'px';
+      phEl.style.background = '#e6e6e6';
+      phEl.style.cursor = 'default';
+      $sheet.appendChild(phEl);
+    }
+
+    $overlay.style.display = 'flex';
+  };
+
+  // Click on sheet background -> deselect active cell
+  $sheet.addEventListener('click', function (e) {
+    if (e.target === $sheet) _clearActiveCell();
+  });
+
+  // --- Active cell selection ---
+  var _activeCell = null;
+  function _setActiveCell(cd) {
+    if (_activeCell && _activeCell !== cd) {
+      _activeCell.el.classList.remove('pv-active');
+    }
+    if (cd && cd.mode !== 'fit') {
+      cd.el.classList.add('pv-active');
+      _activeCell = cd;
+    } else {
+      _activeCell = null;
+    }
+  }
+
+  function _clearActiveCell() {
+    if (_activeCell) {
+      _activeCell.el.classList.remove('pv-active');
+      _activeCell = null;
+    }
+  }
+
+  function _syncClone(cd) {
+    if (!cd.cloneImg) return;
+    cd.cloneImg.style.width = cd.imgEl.style.width;
+    cd.cloneImg.style.height = cd.imgEl.style.height;
+    cd.cloneImg.style.left = cd.imgEl.style.left;
+    cd.cloneImg.style.top = cd.imgEl.style.top;
+  }
+
+  function _attachDrag(cd) {
+    var startX, startY, startOffX, startOffY;
+    var dragging = false;
+
+    function onDown(e) {
+      if (cd.mode === 'fit') return; // no drag in fit mode
+      e.preventDefault();
+      _setActiveCell(cd);
+      dragging = true;
+      var pt = e.touches ? e.touches[0] : e;
+      startX = pt.clientX;
+      startY = pt.clientY;
+      startOffX = cd.offX;
+      startOffY = cd.offY;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      var pt = e.touches ? e.touches[0] : e;
+      var screenDx = pt.clientX - startX;
+      var screenDy = pt.clientY - startY;
+
+      // When sheet is rotated -90° (CW), remap screen coords to element space:
+      // Element +X = screen UP, Element +Y = screen RIGHT
+      // So: element_dx = -screenDy, element_dy = screenDx
+      var dx, dy;
+      if (_rotatedView) {
+        dx = -screenDy;
+        dy = screenDx;
+        
+      } else {
+        dx = screenDx;
+        dy = screenDy;
+      }
+      // Clamp: image must cover the frame
+      var maxLeft = 0;
+      var minLeft = cd.frameW - cd.displayW;
+      var maxTop = 0;
+      var minTop = cd.frameH - cd.displayH;
+      cd.offX = Math.max(minLeft, Math.min(maxLeft, startOffX + dx));
+      cd.offY = Math.max(minTop, Math.min(maxTop, startOffY + dy));
+      cd.imgEl.style.left = cd.offX + 'px';
+      cd.imgEl.style.top = cd.offY + 'px';
+      _syncClone(cd);
+    }
+
+    function onUp() {
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    }
+
+    cd.el.addEventListener('mousedown', onDown);
+    cd.el.addEventListener('touchstart', onDown, { passive: false });
+  }
+
+  function _drawCutMarks(pv, scale) {
+    var cols = pv.cols, rows = pv.rows;
+    var cellW = pv.cell_w * scale;
+    var cellH = pv.cell_h * scale;
+    var gLeft = pv.grid_left * scale;
+    var gBottom = pv.grid_bottom * scale;
+    var sheetH = pv.page_h * scale;
+    var markLen = 0.25 * scale;
+    var markThick = 1;
+
+    // Left & right horizontal marks at row boundaries
+    for (var r = 0; r <= rows; r++) {
+      var y = sheetH - gBottom - r * cellH;
+      var lx = gLeft;
+      var rx = gLeft + cols * cellW;
+      _addMark(lx - markLen, y, markLen, markThick, 'h');
+      _addMark(rx, y, markLen, markThick, 'h');
+    }
+    // Top & bottom vertical marks at column boundaries
+    for (var c = 0; c <= cols; c++) {
+      var x = gLeft + c * cellW;
+      var by = sheetH - gBottom;
+      var ty = sheetH - gBottom - rows * cellH;
+      _addMark(x, by, markThick, markLen, 'v');
+      _addMark(x, ty - markLen, markThick, markLen, 'v');
+    }
+  }
+
+  function _addMark(x, y, w, h, dir) {
+    var m = document.createElement('div');
+    m.className = 'pv-cutmark';
+    if (dir === 'h') {
+      m.style.left = Math.round(x) + 'px';
+      m.style.top = Math.round(y - 0.5) + 'px';
+      m.style.width = Math.round(w) + 'px';
+      m.style.height = '1px';
+    } else {
+      m.style.left = Math.round(x - 0.5) + 'px';
+      m.style.top = Math.round(y) + 'px';
+      m.style.width = '1px';
+      m.style.height = Math.round(h) + 'px';
+    }
+    $sheet.appendChild(m);
+  }
+
+  // Reset all images to centre + fill mode
+  $resetBtn.addEventListener('click', function () {
+    _cells.forEach(function (cd) {
+      cd.mode = 'fill';
+      cd.toggleBtn.className = 'pv-toggle fill';
+      
+      cd.toggleBtn.textContent = 'Fill';
+      cd.displayW = cd.fillW;
+      cd.displayH = cd.fillH;
+      cd.imgEl.style.width = cd.fillW + 'px';
+      cd.imgEl.style.height = cd.fillH + 'px';
+      cd.offX = -Math.round((cd.fillW - cd.frameW) / 2);
+      cd.offY = -Math.round((cd.fillH - cd.frameH) / 2);
+      cd.imgEl.style.left = cd.offX + 'px';
+      cd.imgEl.style.top = cd.offY + 'px';
+      cd.el.style.cursor = 'grab';
+    });
+  });
+
+  // Save & Continue
+  $saveBtn.addEventListener('click', function () {
+    // Convert pixel offsets back to 0..1 range, include mode
+    var offsets = _cells.map(function (cd) {
+      var rangeX = cd.displayW - cd.frameW;
+      var rangeY = cd.displayH - cd.frameH;
+      var ox = rangeX > 0 ? (-cd.offX / rangeX) : 0.5;
+      var oy = rangeY > 0 ? (-cd.offY / rangeY) : 0.5;
+      ox = Math.max(0, Math.min(1, ox));
+      oy = Math.max(0, Math.min(1, oy));
+      return {
+        x: Math.round(ox * 1000) / 1000,
+        y: Math.round(oy * 1000) / 1000,
+        mode: cd.mode
+      };
+    });
+
+    $saveBtn.disabled = true;
+    $saveBtn.textContent = 'Saving...';
+    $resetBtn.disabled = true;
+
+    // Show loader over the sheet (don't hide overlay)
+    $sheet.style.opacity = '0.3';
+    $loaderText.textContent = 'Generating PDF & loading next order...';
+    $loader.style.display = 'flex';
+
+    fetch('/polaroid/preview-confirm/' + encodeURIComponent(_taskId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offsets: offsets }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) {
+        alert(d.error);
+        $loader.style.display = 'none';
+        $sheet.style.opacity = '1';
+        $saveBtn.disabled = false;
+        $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+        $resetBtn.disabled = false;
+        return;
+      }
+      // Stay on overlay - loader shows until next preview arrives
+      // or pipeline finishes (handled by SSE done event)
+    })
+    .catch(function (err) {
+      alert('Save failed: ' + err.message);
+      $loader.style.display = 'none';
+      $sheet.style.opacity = '1';
+      $saveBtn.disabled = false;
+      $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+      $resetBtn.disabled = false;
+    });
+  });
+})();
+
 </script>
 
 <script>
