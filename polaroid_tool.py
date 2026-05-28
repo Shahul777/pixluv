@@ -2,6 +2,9 @@ import json
 import logging
 import shutil
 import zipfile
+import tempfile
+import zipfile
+import fitz
 from PIL import Image
 import math
 import os
@@ -13,14 +16,14 @@ from pathlib import Path
 import tempfile
 from natsort import natsorted
 from flask import Blueprint, Response, jsonify, request
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_setting, set_setting, log_activity
 
 # --- Import image-placement engine from imageplacer.py ---
 from imageplacer import (LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf,prepare_preview,PAGE_W,PAGE_H)
 
 polaroid_bp = Blueprint("polaroid", __name__)
-
+log = logging.getLogger("polaroid")
 # --- Progress infrastructure (same pattern as Module 1 in app.py) ---
 _pq: dict[str, queue.Queue] = {}
 _pq_lock = threading.Lock()
@@ -31,7 +34,7 @@ _preview_data: dict[str, dict] = {}  # task_id -> {images, even
 _preview_lock = threading.Lock()
 _preview_tmp_dirs: dict[str, str] = {}  # task_id -> temp dir pa
 SETTING_BASE_FOLDER = "polaroid_base_folder"
-
+_pdf_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf-gen")
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
 _VARIANT_SUFFIX_RE = re.compile(r"-(3x[23])\s*$", re.IGNORECASE)
 
@@ -87,16 +90,77 @@ def _extract_order_id(folder_name: str) -> str | None:
 def _is_special(folder_name: str) -> bool:
     """True if folder name contains q1, q2, set1, set2 etc."""
     return bool(_SPECIAL_RE.search(folder_name))
-
+def _extract_pdf_images(pdf_path: Path, dest_dir: Path) -> list[Path]:
+    """Extract images embedded in a PDF into dest_dir. If a page has no
+    embedded images, render the whole page as a 300dpi PNG instead.
+    Output filenames are deterministic so re-runs are idempotent."""
+    out: list[Path] = []
+    stem = pdf_path.stem
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        log.warning("Could not open PDF %s: %s", pdf_path, e)
+        return out
+    try:
+        for pno in range(len(doc)):
+            page = doc[pno]
+            try:
+                images = page.get_images(full=True)
+            except Exception:
+                images = []
+            if images:
+                for idx, info in enumerate(images, 1):
+                    xref = info[0]
+                    try:
+                        ext_img = doc.extract_image(xref)
+                    except Exception:
+                        continue
+                    ext = (ext_img.get("ext") or "png").lower()
+                    if ext in {"jpx", "jb2", "jpeg2000"}:
+                        ext = "png"
+                    if f".{ext}" not in SUPPORTED_EXTENSIONS:
+                        ext = "png"
+                    out_path = dest_dir / f"_pdf_{stem}_p{pno+1:03d}_{idx:02d}.{ext}"
+                    if not out_path.exists():
+                        try:
+                            out_path.write_bytes(ext_img["image"])
+                        except Exception as e:
+                            log.warning("Failed writing %s: %s", out_path, e)
+                            continue
+                    out.append(out_path)
+            else:
+                out_path = dest_dir / f"_pdf_{stem}_p{pno+1:03d}.png"
+                if not out_path.exists():
+                    try:
+                        pix = page.get_pixmap(dpi=300)
+                        pix.save(out_path)
+                    except Exception as e:
+                        log.warning("Failed rendering %s page %d: %s", pdf_path, pno+1, e)
+                        continue
+                out.append(out_path)
+    finally:
+        doc.close()
+    return out
 def _collect_images(folder: Path) -> list[str]:
-    """Return sorted list of image file paths inside a folder."""
-    imgs = []
+    """Return sorted list of image file paths inside a folder. Also extracts
+    images from any PDF files in the folder and includes them."""
+    imgs: list[str] = []
+    pdfs: list[Path] = []
     for f in folder.iterdir():
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+        if not f.is_file():
+            continue
+        suf = f.suffix.lower()
+        if suf in SUPPORTED_EXTENSIONS:
             imgs.append(str(f))
+        elif suf == ".pdf":
+            pdfs.append(f)
+    for pdf in pdfs:
+        for p in _extract_pdf_images(pdf, folder):
+            sp = str(p)
+            if sp not in imgs:
+                imgs.append(sp)
     imgs = natsorted(imgs, key=lambda p: Path(p).name.lower())
     return imgs
-
 def _output_folder_for(ship_folder: Path) -> Path:
     """ship-30-4-image -> ship-30-4-output (sibling folder)."""
     name = ship_folder.name
@@ -165,6 +229,7 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
         skipped_count = 0
         pdf_count = 0
         results: list[dict] = []
+        _pdf_futures: list =[]
 
         for oi, order_dir in enumerate(order_dirs):
             folder_name = order_dir.name
@@ -300,19 +365,16 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
                     pass
                 with _preview_lock:
                     _preview_tmp_dirs.pop(task_id, None)
+                    # Generate final PDF in background thread so next preview loads instantly
+                _pdf_futures.append(_pdf_executor.submit(
+                         generate_pdf, batch, pdf_out, label, layout, layout_key,
+                                    offsets=user_offsets
+                                                ))
 
-        # Generate final PDF with user-adjusted offsets
-                generate_pdf(batch, pdf_out, label, layout, layout_key,
-                                offsets=user_offsets)
+   
                 pdf_count += 1
 
-                # Sub-progress within order
-                sub_pct = 10 + int(((oi + (pi + 1) / num_pdfs) / total_orders) * 85)
-                _emit(q, stage="process", pct=sub_pct,
-                      detail=f"{folder_name}: PDF {pi + 1}/{num_pdfs} done",
-                      done=False, order_index=oi, order_total=total_orders,
-                      order_name=folder_name, status="processing")
-
+ 
             processed_count += 1
             results.append({
                 "folder": folder_name, "variant": variant,
@@ -321,6 +383,18 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
             })
 
         # --- Stage: done -----------------------------------------
+        
+        
+        # — Wait for all background PDF generations to finish ———
+        if _pdf_futures:
+            _emit(q, stage="process", pct=96,
+                detail="Waiting for remaining PDFs to finish...",
+                done=False)
+            for fut in as_completed(_pdf_futures):
+                try:
+                    fut.result()  # raise if PDF gen failed
+                except Exception as exc:
+                    log.warning("Background PDF generation failed: %s", exc)
         elapsed = round(time.perf_counter() - t0, 1)
 
         log_activity("polaroid", "bulk_process", json.dumps({
@@ -844,8 +918,6 @@ def _run_extract_images(ship_folder_path: str, task_id: str):
                   "zips_extracted": orders_with_zip,
                   "files_deleted": total_deleted,
                   "ocr_removed": total_ocr_removed,
-                  "files_deleted": total_deleted,
-                  "ocr_removed": total_ocr_removed,
                   "report_path": str(report_path),
                   "elapsed": elapsed,
               })
@@ -855,13 +927,14 @@ def _run_extract_images(ship_folder_path: str, task_id: str):
         _emit(q, stage="error", pct=0, detail="", done=True,
               error=str(exc))
 
+
 @polaroid_bp.route("/polaroid/extract-start", methods=["POST"])
 def start_extract():
     data = request.get_json(silent=True) or {}
     ship_folder = data.get("ship_folder", "").strip()
     if not ship_folder:
         return jsonify({"error": "ship_folder is required."}), 400
-
+    
     ship_folder = os.path.normpath(ship_folder)
     if not Path(ship_folder).is_dir():
         return jsonify({"error": f"Folder not found: {ship_folder}"}), 400
@@ -876,6 +949,7 @@ def start_extract():
 
     return jsonify({"task_id": task_id})
 
+
 @polaroid_bp.route("/polaroid/extract-progress/<task_id>")
 def extract_progress(task_id: str):
     def generate():
@@ -889,7 +963,6 @@ def extract_progress(task_id: str):
             except queue.Empty:
                 yield ": keepalive\n\n"
                 continue
-            
             yield f"data: {json.dumps(msg)}\n\n"
             if msg.get("done"):
                 _del_q(task_id)

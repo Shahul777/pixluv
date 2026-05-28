@@ -416,7 +416,7 @@ def _number_shipping_labels(output_folder: Path,
             page.draw_rect(bg, color=None, fill=(1, 1, 1))
             page.insert_text((x, y), serial_text,
                              fontsize=serial_fs, fontname="helv",
-                             color=(1, 0, 0))
+                             color=(0, 0, 0))
             labeled_count += 1
             _m1_log.info("P%d %s: stamped '%s' for order %s",
                          page_num+1, quad_name, serial_text, oid4)
