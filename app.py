@@ -69,7 +69,17 @@ COMBINED_RE = re.compile(r"combined", re.IGNORECASE)
 
 PREFIX_RE = re.compile(r"^\d{2,}_")
 
-
+def _extract_name_from_filename(filename: str) -> str | None:
+    """Extract the name portion before the 4-digit order ID from a filename.
+    E.g. '01_mike-1239.pdf' -> 'mike', '03_shahul-1239-3x2.pdf' -> 'shahul'."""
+    stem = Path(filename).stem
+    # Strip numeric prefix (e.g. '01_')
+    stem = PREFIX_RE.sub("", stem)
+    m = FOUR_DIGIT_RE.search(stem)
+    if not m:
+        return None
+    prefix = stem[:m.start()]
+    return prefix.rstrip("-").lower() if prefix else None
 def extract_four_digit_id(filename: str) -> str | None:
     m = FOUR_DIGIT_RE.search(filename)
     return m.group(1) if m else None
@@ -224,7 +234,8 @@ def _add_index_to_pdfs(folder: Path, sorted_list: list[dict],
 
 def _number_shipping_labels(output_folder: Path,
                             oid_to_serial: dict[str, int],
-                            q: queue.Queue | None = None) -> dict | None:
+                           q: queue.Queue | None = None,
+                            sorted_list: list[dict] | None = None) -> dict | None:
     """Stamp serial numbers on each label inside the shipping-labels PDF.
 
     Looks for  <output_folder>/label/optimized_shipping_labels.pdf.
@@ -491,7 +502,48 @@ def _number_shipping_labels(output_folder: Path,
         report_lines.append("-" * 40)
         for pos in unrecognised_labels:
             report_lines.append(f"  {pos}")
+            
+            
+            
+            
+            
+            
+     
+        
+        
         report_lines.append("")
+
+    # Repeated order IDs (same 4-digit ID, different names)
+    if sorted_list:
+        oid_to_files: dict[str, list[str]] = {}
+        for item in sorted_list:
+            oid = item.get("four_digit_id")
+            if oid:
+                oid_to_files.setdefault(oid, []).append(item["new_name"])
+        repeated_ids: dict[str, list[str]] = {}
+        for oid, files in oid_to_files.items():
+            distinct_names = set()
+            for fname in files:
+                name_part = _extract_name_from_filename(fname)
+                if name_part:
+                    distinct_names.add(name_part)
+            if len(distinct_names) > 1:
+                repeated_ids[oid] = files
+        if repeated_ids:
+            report_lines.append("⚠ REPEATED ORDER IDs (same 4-digit ID, different names):")
+            report_lines.append("-" * 40)
+            for oid, files in repeated_ids.items():
+                report_lines.append(f"  Order ID {oid}:")
+                for fn in files:
+                    report_lines.append(f"    - {fn}")
+            report_lines.append("")
+        
+        
+        
+        
+        
+        
+        
 
     report_path = label_dir / "label_report.txt"
     report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
@@ -614,7 +666,7 @@ def _run_module1(folder_path: str, task_id: str):
         _emit(q, stage="labels", pct=40,
               detail="Looking for shipping labels...")
         try:
-            label_result = _number_shipping_labels(folder, oid_to_serial, q)
+            label_result = _number_shipping_labels(folder, oid_to_serial, q, sorted_list)
             if label_result:
                 _emit(q, stage="labels", pct=48,
                       detail=f"Created {label_result['filename']} - "
@@ -670,22 +722,42 @@ def _run_module1(folder_path: str, task_id: str):
             n = len(ids) if ids else 1
             for oid in ids:
                 if oid not in id_info:
-                    id_info[oid] = {"variant": variant, "count": 0.0}
+                    id_info[oid] = {"variant": variant, "count": 0.0, "files": []}
                 id_info[oid]["count"] += 1.0 / n
+                id_info[oid]["files"].append(item["new_name"])
 
         report_lines: list[str] = []
         for oid, info in id_info.items():
             c = info["count"]
             count_str = str(int(c)) if c == int(c) else f"{c:.1f}"
             report_lines.append(f"{oid}\t{info['variant']}\t{count_str}")
+        # Detect repeated order IDs (same 4-digit ID, different names)
+        repeated_ids: dict[str, list[str]] = {}
+        for oid, info in id_info.items():
+            distinct_names = set()
+            for fname in info["files"]:
+                name_part = _extract_name_from_filename(fname)
+                if name_part:
+                    distinct_names.add(name_part)
+            if len(distinct_names) > 1:
+                repeated_ids[oid] = info["files"]
 
-            num_orders = len(id_info)
-            total_boards = total
-            boards_4x3 = sum(1 for item in sorted_list if item["variant"] == "4x3")
-            boards_3x2 = sum(1 for item in sorted_list if item["variant"] == "3x2")
-            boards_3x3 = sum(1 for item in sorted_list if item["variant"] == "3x3")
-            boards_4x6 = sum(1 for item in sorted_list if item["variant"] == "4x6")
-            summary_header = (
+        repeated_section = ""
+        if repeated_ids:
+            repeated_section = "\n⚠ REPEATED ORDER IDs (same 4-digit ID, different names):\n"
+            repeated_section += "-" * 50 + "\n"
+            for oid, files in repeated_ids.items():
+                repeated_section += f"  Order ID {oid}:\n"
+                for fn in files:
+                    repeated_section += f"    - {fn}\n"
+            repeated_section += "\n"
+        num_orders = len(id_info)
+        total_boards = total
+        boards_4x3 = sum(1 for item in sorted_list if item["variant"] == "4x3")
+        boards_3x2 = sum(1 for item in sorted_list if item["variant"] == "3x2")
+        boards_3x3 = sum(1 for item in sorted_list if item["variant"] == "3x3")
+        boards_4x6 = sum(1 for item in sorted_list if item["variant"] == "4x6")
+        summary_header = (
                     f"Orders: {num_orders}\n"
                  f"Total Boards: {total_boards}\n"
                     f"4x3 Boards: {boards_4x3}\n"
@@ -699,7 +771,7 @@ def _run_module1(folder_path: str, task_id: str):
 
         report_path = folder / "report.txt"
         report_path.write_text(
-         summary_header + "Order ID\tVariant\tCount\n" + "\n".join(report_lines),
+      summary_header + "Order ID\tVariant\tCount\n" + "\n".join(report_lines) + "\n" + repeated_section,
     encoding="utf-8",
         )
 

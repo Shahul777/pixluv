@@ -201,12 +201,16 @@ def process_image(filepath: str, out_path: str, layout: dict,
         img = img.convert("RGB")
     # User-requested clockwise rotation (0, 90, 180, 270)
     rotation = int(rotation) % 360 if rotation else 0
-    if rotation in (90, 180, 270):
-        img = img.rotate(-rotation, expand=True)
+
     if layout["rotate"]:
         w, h = img.size
-        if w > h and rotation == 0:
+        if w > h:
             img = img.rotate(-90, expand=True)
+            if rotation in (90, 180, 270):
+                img = img.rotate(-rotation, expand=True)
+        else:
+            if rotation in (90, 180, 270):
+                img = img.rotate(-rotation, expand=True)
         if mode == "fit":
             img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
         else:

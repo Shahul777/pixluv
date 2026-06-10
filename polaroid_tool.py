@@ -173,17 +173,33 @@ def _output_folder_for(ship_folder: Path) -> Path:
     else:
         out_name = name + "-output"
     return ship_folder.parent / out_name
-
+def _extract_name_part(folder_name: str) -> str | None:
+    """Extract the name portion before the 4-digit order ID.
+    E.g. 'john-1234-3x2' -> 'john', 'mike-doe-5678' -> 'mike-doe'."""
+    m = _ORDER_ID_RE.search(folder_name)
+    if not m:
+        return None
+    prefix = folder_name[:m.start()]
+    # Remove trailing dash if present
+    return prefix.rstrip("-").lower() if prefix else None
 def _pdf_already_exists(output_dir: Path, order_id: str | None, folder_name: str, is_special: bool) -> bool:
     """Check if output PDF for this order already exists.
     Skip only if NOT a special (q/set) order and a matching PDF is present."""
     if is_special or order_id is None:
         return False
+    name_part = _extract_name_part(folder_name)
     for f in output_dir.iterdir():
         if not f.is_file() or f.suffix.lower() != ".pdf":
             continue
+        stem_lower = f.stem.lower()
         if order_id in f.stem:
-            return True
+            # If we can extract a name, also verify the name matches
+            if name_part:
+                if name_part in stem_lower:
+                    return True
+            else:
+                # No name to compare, fall back to ID-only match
+                return True
     return False
 
 # --- Core processing thread ---
@@ -878,6 +894,32 @@ def _run_extract_images(ship_folder_path: str, task_id: str):
         report_lines.append("-" * 70)
         report_lines.append(f"{'TOTAL':<45} {'':<12} {total_images:>8}")
         report_lines.append("")
+     
+        oid_to_folders: dict[str, list[str]] = {}
+        for res in results:
+            oid = res["order_id"]
+            if oid and oid != "":
+                oid_to_folders.setdefault(oid, []).append(res["folder"])
+        repeated_ids: dict[str, list[str]] = {}
+        for oid, folders in oid_to_folders.items():
+            distinct_names = set()
+            for fn in folders:
+                name_part = _extract_name_part(fn)
+                distinct_names.add(name_part or fn)
+            if len(distinct_names) > 1:
+                repeated_ids[oid] = folders
+        if repeated_ids:
+            report_lines.append("⚠ REPEATED ORDER IDs (same 4-digit ID, different names):")
+            report_lines.append("-" * 50)
+            for oid, folders in repeated_ids.items():
+                report_lines.append(f"  Order ID {oid}:")
+                for fn in folders:
+                    report_lines.append(f"    - {fn}")
+            
+            
+            report_lines.append("")
+            
+            
 
         # Details section
         has_details = any(r["extracted_zip"] or r["deleted"] or r["ocr_removed"]
