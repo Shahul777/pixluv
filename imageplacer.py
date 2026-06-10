@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(me
 log = logging.getLogger("basa-web")
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 600 * 1024 * 1024
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 if HEIC_SUPPORTED:
@@ -56,9 +56,9 @@ LAYOUTS = {
         "cols": 3, "rows": 6, "max_images": 18,
         "cell_w": 4.0, "cell_h": 3.0,
         "grid_left": 0.5, "grid_bottom": 0.5,
-        "photo_w": 3.11, "photo_h": 2.69,
-        "offset_x": 0.74, "offset_y": 0.15,
-        "frame_w_px": 810, "frame_h_px": 930,
+        "photo_w": 3.0, "photo_h": 2.5,
+        "offset_x": 0.75, "offset_y": 0.25,
+        "frame_w_px": 750, "frame_h_px": 900,
         "rotate": True, "label_y": 0.25,
     },
     "3x2_polaroid_36": {

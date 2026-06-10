@@ -621,10 +621,10 @@ def confirm_preview(task_id: str):
 _log = logging.getLogger("extract-image")
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".heic", ".heif", ".webp"}
 
-_OCR_KEYWORDS = re.compile(r"(Note\s*:|PIXLUV)", re.IGNORECASE)
+_OCR_KEYWORDS = re.compile(r"(Note\s*:|PIXLUV|contact)", re.IGNORECASE)
 
 _ocr_engine = None
-_OCR_SKIP_SIZE = 100 * 1024  # skip files > 100KB (real photos, not promo cards)
+_OCR_SKIP_SIZE = 60 * 1024  # skip files > 100KB (real photos, not promo cards)
 
 def _get_ocr():
     global _ocr_engine
