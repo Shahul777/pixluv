@@ -448,6 +448,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
         <div class="summary-item">4x3 Boards: <span id="sumBoards4x3">-</span></div>
         <div class="summary-item">3x2 Boards: <span id="sumBoards3x2">-</span></div>
         <div class="summary-item">3x3 Boards: <span id="sumBoards3x3">-</span></div>
+        <div class="summary-item">4x6 Boards: <span id="sumBoards4x6">-</span></div>
         <div class="summary-item">Time: <span id="sumTime">-</span></div>
         <div class="summary-item">Combined PDF: <span id="sumPdf">-</span></div>
     </div>
@@ -659,6 +660,34 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
         <div>
             <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
         </div>
+    <div>
+            <button id="m5WaBtn" class="btn btn-outline"
+            style="padding:10px 16px; background: rgba(37,211,102,0.1); border-color: rgba(37,211,102,0.4);
+            color: #25d366;" title="Import orders from WhatsApp chat export">&#128172; WA Import</button>
+        </div>
+    </div>
+
+    <div id="m5WaModal" style="display:none; margin:14px 0; padding:16px; border-radius:10px;
+    background: rgba(37,211,102,0.05); border:1px solid rgba(37,211,102,0.2);">
+        <p style="font-size:.82rem; color: #aaa; margin:0 0 10px;">
+        Upload a WhatsApp <strong>exported chat ZIP</strong> (with media). Orders will be sorted into folders.
+        </p>
+        <div class="form-row" style="margin-bottom:10px;">
+            <div class="form-group">
+                <label for="m5WaDest">Destination Folder</label>
+                <input type="text" class="form-input" id="m5WaDest" placeholder="C:\Users\you\Desktop\ship-date-images">
+            </div>
+            <div class="form-group" style="max-width:260px;">
+                <label for="m5WaZip">Chat ZIP</label>
+                <input type="file" class="form-input" id="m5WaZip" accept=".zip">
+            </div>
+        </div>
+        <div>
+            <button id="m5WaGoBtn" class="btn btn-success" style="padding:10px 18px;">&#128229; Import</button>
+        </div>
+        <div id="m5WaResult" style="display:none; font-size:.8rem; color: #ccc;"></div>
+    
+    
     </div>
 
     <div class="progress-section" id="m5ExtProgress">
@@ -973,7 +1002,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 .pv-body {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  overflow: auto; padding: 16px;
+  overflow: auto; padding: 8px;
 }
 .pv-sheet-wrap {
   display: flex; align-items: center; justify-content: center;
@@ -1071,6 +1100,32 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 .pv-toggle.fit {
   background: rgba(234,179,8,0.85); color: #000;
 }
+
+.pv-rotate {
+    position: absolute; bottom: 3px; left: 3px; z-index: 3;
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 9px; font-weight: 700;
+    cursor: pointer; border: none;
+    background: rgba(20,184,166,0.85); color: #fff;
+    transition: background .15s;
+    pointer-events: auto; line-height: 1;
+}
+.pv-rotate:hover { background: rgba(20,184,166,1); }
+.pv-rotate.rotated { background: rgba(244,63,94,0.9); }
+.pv-zoom {
+    position: absolute; top: 2px; right: 3px; z-index: 3;
+    display: flex; gap: 2px;
+    pointer-events: auto;
+}
+.pv-zoom button {
+    padding: 0px 4px; border-radius: 3px;
+    font-size: 10px; font-weight: 700;
+    cursor: pointer; border: none;
+    background: rgba(59,130,246,0.85); color: #fff;
+    transition: background .15s;
+    line-height: 1.3;
+}
+.pv-zoom button:hover { background: rgba(59,130,246,1); }
 /* Loader between orders */
 .pv-loader {
   position: absolute; inset: 0; z-index: 10;
@@ -1844,7 +1899,66 @@ function enableControls() {
     .catch(function (e) { alert('Failed: ' + e.message); })
     .finally(function () { $saveBase.disabled = false; });
   });
+/* — WhatsApp Import — */
+var $waBtn       = document.getElementById('m5WaBtn');
+var $waModal     = document.getElementById('m5WaModal');
+var $waDest      = document.getElementById('m5WaDest');
+var $waZip       = document.getElementById('m5WaZip');
+var $waGoBtn     = document.getElementById('m5WaGoBtn');
+var $waResult    = document.getElementById('m5WaResult');
 
+$waBtn.addEventListener('click', function () {
+    var vis = $waModal.style.display === 'none';
+    $waModal.style.display = vis ? 'block' : 'none';
+    if (vis && $base.value.trim()) {
+        $waDest.value = $base.value.trim();
+    }
+});
+
+$waGoBtn.addEventListener('click', function () {
+    var dest = $waDest.value.trim();
+    var file = $waZip.files[0];
+    if (!dest) { alert('Set destination folder'); return; }
+    if (!file) { alert('Select a WhatsApp chat ZIP'); return; }
+
+    $waGoBtn.disabled = true;
+    $waGoBtn.textContent = 'Importing...';
+    $waResult.style.display = 'none';
+
+    var fd = new FormData();
+    fd.append('dest_folder', dest);
+    fd.append('zip', file);
+
+    fetch('/polaroid/wa-import', { method: 'POST', body: fd })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+        if (d.error) {
+            $waResult.style.display = 'block';
+            $waResult.style.color = '#f87171';
+            $waResult.textContent = 'Error: ' + d.error;
+            return;
+        }
+        $waResult.style.display = 'block';
+        $waResult.style.color = '#4ade80';
+        var lines = d.orders.map(function (o) {
+            return o.order + ' (' + o.files + ' files)';
+        });
+        $waResult.innerHTML = '<strong>' + d.total + ' orders imported:</strong><br>' +
+            lines.join('<br>');
+        
+        // Refresh ship folders if base matches
+        if ($base.value.trim()) loadShipFolders();
+    })
+    .catch(function (e) {
+        $waResult.style.display = 'block';
+        $waResult.style.color = '#f87171';
+        $waResult.textContent = 'Request failed: ' + e.message;
+    })
+    .finally(function () {
+        $waGoBtn.disabled = false;
+        $waGoBtn.textContent = '\u{1F4E5} Import';
+    });
+});
   /* --- Load ship folders --- */
   function loadShipFolders() {
     $ship.disabled = true;
@@ -2357,8 +2471,8 @@ $searchId.addEventListener('keydown', function (e) {
 
     // Calculate scale: fit the 13x19 sheet into the viewport
     // Try both portrait and landscape orientation, pick whichever is bigger
-    var vw = window.innerWidth - 64;
-    var vh = window.innerHeight - 140;
+    var vw = window.innerWidth - 32;
+    var vh = window.innerHeight - 100;
     var pageW = pv.page_w;
     var pageH = pv.page_h;
     var scalePortrait  = Math.min(vw / pageW, vh / pageH);
@@ -2453,7 +2567,25 @@ $searchId.addEventListener('keydown', function (e) {
       toggleBtn.textContent = 'Fill';
       toggleBtn.title = 'Toggle Fit / Fill';
       cellEl.appendChild(toggleBtn);
-      
+      // Rotate button (90° clockwise per click)
+    var rotateBtn = document.createElement('button');
+    rotateBtn.className = 'pv-rotate';
+    rotateBtn.innerHTML = '\u21BB';
+    rotateBtn.title = 'Rotate 90° clockwise';
+    cellEl.appendChild(rotateBtn);
+
+    // Zoom +/- buttons
+    var zoomWrap = document.createElement('div');
+    zoomWrap.className = 'pv-zoom';
+    var zoomInBtn = document.createElement('button');
+    zoomInBtn.textContent = '+';
+    zoomInBtn.title = 'Zoom in';
+    var zoomOutBtn = document.createElement('button');
+    zoomOutBtn.textContent = '-';
+    zoomOutBtn.title = 'Zoom out';
+    zoomWrap.appendChild(zoomInBtn);
+    zoomWrap.appendChild(zoomOutBtn);
+    cellEl.appendChild(zoomWrap);
 
       // Image element (oversized, draggable)
       var imgEl = document.createElement('img');
@@ -2526,6 +2658,9 @@ $searchId.addEventListener('keydown', function (e) {
         el: cellEl,
         imgEl: imgEl,
         toggleBtn: toggleBtn,
+        rotateBtn: rotateBtn,
+        zoomInBtn: zoomInBtn,
+        zoomOutBtn: zoomOutBtn,
         displayW: Math.round(photoW),
         displayH: Math.round(photoH),
         fillW: Math.round(photoW),   // will be set on img load
@@ -2536,6 +2671,8 @@ $searchId.addEventListener('keydown', function (e) {
                 offY: initY,
         index: i,
         mode: 'fill',
+        rotation: 0,
+        zoom: 1.0,
       };
       _cells.push(cellData);
 
@@ -2598,6 +2735,76 @@ $searchId.addEventListener('keydown', function (e) {
           }
         });
       })(cellData, toggleBtn);
+      
+      (function (cd_, btn_) {
+        btn_.addEventListener('click', function (e) {
+            e.stopPropagation();
+            cd_.rotation = (cd_.rotation + 90) % 360;
+            var t = 'rotate(' + cd_.rotation + 'deg)';
+            cd_.imgEl.style.transformOrigin = 'center center';
+            cd_.imgEl.style.transform = t;
+            if (cd_.cloneImg) {
+                cd_.cloneImg.style.transformOrigin = 'center center';
+                cd_.cloneImg.style.transform = t;
+            }
+            if (cd_.rotation === 0) {
+                btn_.classList.remove('rotated');
+            } else {
+                btn_.classList.add('rotated');
+            }
+        });
+    })(cellData, rotateBtn);
+
+    // Attach zoom handlers
+    (function (cd_) {
+        function applyZoom() {
+            var natW = cd_.imgEl.naturalWidth || cd_.fillW;
+            var natH = cd_.imgEl.naturalHeight || cd_.fillH;
+      // Base scale = fill (cover frame). Min zoom shows full image (fit).
+var fillScale = Math.max(cd_.frameW / natW, cd_.frameH / natH);
+var fitScale = Math.min(cd_.frameW / natW, cd_.frameH / natH);
+var minZoom = fitScale / fillScale;  // ratio where image fits inside
+cd_.zoom = Math.max(Math.round(minZoom * 100) / 100, cd_.zoom);
+var s = fillScale * cd_.zoom;
+            var dw = Math.round(natW * s);
+            var dh = Math.round(natH * s);
+            cd_.displayW = dw;
+            cd_.displayH = dh;
+            cd_.fillW = dw;
+            cd_.fillH = dh;
+// Centre the image
+cd_.offX = Math.round((cd_.frameW - dw) / 2);
+cd_.offY = Math.round((cd_.frameH - dh) / 2);
+            cd_.imgEl.style.width = dw + 'px';
+            cd_.imgEl.style.height = dh + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            // Update mode label based on coverage
+if (dw >= cd_.frameW && dh >= cd_.frameH) {
+    cd_.mode = 'fill';
+    cd_.toggleBtn.className = 'pv-toggle fill';
+    cd_.toggleBtn.textContent = 'Fill';
+    cd_.el.style.cursor = 'grab';
+} else {
+    cd_.mode = 'fit';
+    cd_.toggleBtn.className = 'pv-toggle fit';
+    cd_.toggleBtn.textContent = 'Fit';
+    cd_.el.style.cursor = 'default';
+}
+            _syncClone(cd_);
+        }
+        cd_.zoomInBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+  cd_.zoom = Math.min(3.0, Math.round((cd_.zoom + 0.1) * 100) / 100);
+            applyZoom();
+        });
+        cd_.zoomOutBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+ cd_.zoom = Math.round((cd_.zoom - 0.1) * 100) / 100;
+applyZoom();  // applyZoom clamps to minimum
+        });
+    })(cellData);
+      
     }
 
     // Add placeholders for empty slots
@@ -2655,6 +2862,12 @@ $searchId.addEventListener('keydown', function (e) {
     cd.cloneImg.style.height = cd.imgEl.style.height;
     cd.cloneImg.style.left = cd.imgEl.style.left;
     cd.cloneImg.style.top = cd.imgEl.style.top;
+    if (cd.rotation) {
+        cd.cloneImg.style.transformOrigin = 'center center';
+        cd.cloneImg.style.transform = 'rotate(' + cd.rotation + 'deg)';
+    } else {
+        cd.cloneImg.style.transform = '';
+    }
   }
 
   function _attachDrag(cd) {
@@ -2781,6 +2994,12 @@ $searchId.addEventListener('keydown', function (e) {
       cd.imgEl.style.left = cd.offX + 'px';
       cd.imgEl.style.top = cd.offY + 'px';
       cd.el.style.cursor = 'grab';
+      // Reset rotation & zoom
+      cd.rotation = 0;
+      cd.zoom = 1.0;
+      cd.imgEl.style.transform = '';
+      if (cd.rotateBtn) cd.rotateBtn.classList.remove('rotated');
+      _syncClone(cd);
     });
   });
 
@@ -2797,7 +3016,9 @@ $searchId.addEventListener('keydown', function (e) {
       return {
         x: Math.round(ox * 1000) / 1000,
         y: Math.round(oy * 1000) / 1000,
-        mode: cd.mode
+        mode: cd.mode,
+        rotation: cd.rotation || 0,
+        zoom: Math.round(cd.zoom * 100) / 100
       };
     });
 

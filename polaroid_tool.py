@@ -36,7 +36,7 @@ _preview_tmp_dirs: dict[str, str] = {}  # task_id -> temp dir pa
 SETTING_BASE_FOLDER = "polaroid_base_folder"
 _pdf_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf-gen")
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
-_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23])\s*$", re.IGNORECASE)
+_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23]|4x6)\s*$", re.IGNORECASE)
 
 # Ship-folder pattern: contains "ship" and "image" (flexible date formats)
 _SHIP_FOLDER_RE = re.compile(r"ship.*image", re.IGNORECASE)
@@ -52,12 +52,14 @@ _VARIANT_TO_LAYOUT = {
     "4x3": "4x3_polaroid_18",
     "3x2": "3x2_polaroid_36",
     "3x3": "3x3_square_24",
+    "4x6": "4x6_frame_9",
 }
 
 _UPS = {
     "4x3": 18,
     "3x2": 36,
     "3x3": 24,
+    "4x6":9,
 }
 def _new_q(task_id: str) -> queue.Queue:
     q: queue.Queue = queue.Queue()
@@ -972,3 +974,115 @@ def extract_progress(task_id: str):
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no"})
                              
+                             
+                             
+# Regex to match WhatsApp exported chat lines (various date/time formats)
+_WA_MSG_RE = re.compile(
+    r"^\[?\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s+\d{1,2}[:.]\d{2}"
+    r"(?:[:.]\d{2})?\s*(?:AM|PM|am|pm)?\]?\s*-?\s*"
+    r"([^:]+):\s*(.*)"
+)
+
+# Regex to detect order header messages: name-id or name-id-variant
+_WA_ORDER_RE = re.compile(
+    r"^([A-Za-z0-9_ ]+?)\s*-\s*(\d{3,5})(?:\s*-\s*(3x[23]|4x[36]))?\s*$",
+    re.IGNORECASE
+)
+
+# Regex to detect attached media filenames in message text
+_WA_MEDIA_RE = re.compile(
+    r"([\w\-]+\.(jpg|jpeg|png|heic|heif|bmp|tiff|tif|pdf|mp4|mov|avi|mkv|webp|gif|doc|docx|zip))",
+    re.IGNORECASE
+)
+
+@polaroid_bp.route("/polaroid/wa-import", methods=["POST"])
+def wa_import():
+    """Import WhatsApp exported chat ZIP -> create order folders with media."""
+    dest_folder = request.form.get("dest_folder", "").strip()
+    if not dest_folder or not os.path.isdir(dest_folder):
+        return jsonify({"error": "Invalid destination folder"}), 400
+
+    zip_file = request.files.get("zip")
+    if not zip_file:
+        return jsonify({"error": "No ZIP file uploaded"}), 400
+
+    tmp_dir = tempfile.mkdtemp(prefix="wa_import_")
+    try:
+        zip_path = os.path.join(tmp_dir, "chat.zip")
+        zip_file.save(zip_path)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        # Find the chat text file (_chat.txt or chat.txt)
+        chat_txt = None
+        for name in os.listdir(tmp_dir):
+            if name.lower().endswith(".txt") and "chat" in name.lower():
+                chat_txt = os.path.join(tmp_dir, name)
+                break
+
+        if not chat_txt:
+            return jsonify({"error": "No chat .txt file found in ZIP"}), 400
+
+        # Parse the chat file
+        orders = []
+        current_order = None
+
+        with open(chat_txt, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                msg_match = _WA_MSG_RE.match(line)
+                if msg_match:
+                    msg_text = msg_match.group(2).strip()
+                    order_match = _WA_ORDER_RE.match(msg_text)
+
+                    if order_match:
+                        folder_name = msg_text.replace(" ", "")
+                        current_order = {"name": folder_name, "media": []}
+                        orders.append(current_order)
+                        continue
+
+                    if current_order is not None:
+                        media_match = _WA_MEDIA_RE.search(msg_text)
+                        if media_match:
+                            current_order["media"].append(media_match.group(1))
+
+        if not orders:
+            return jsonify({"error": "No orders found in chat"}), 400
+
+        # Create folders and copy media
+        created = []
+        for order in orders:
+            order_dir = os.path.join(dest_folder, order["name"])
+            os.makedirs(order_dir, exist_ok=True)
+
+            copied = 0
+            for media_name in order["media"]:
+                src = _find_media_file(tmp_dir, media_name)
+                if src:
+                    dst = os.path.join(order_dir, os.path.basename(src))
+                    if not os.path.exists(dst):
+                        shutil.copy2(src, dst)
+                        copied += 1
+            created.append({"order": order["name"], "files": copied})
+
+        return jsonify({"ok": True, "orders": created, "total": len(created)})
+
+    except zipfile.BadZipFile:
+        return jsonify({"error": "Invalid ZIP file"}), 400
+    except Exception as e:
+        log.exception("WhatsApp import failed")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+def _find_media_file(base_dir: str, filename: str) -> str | None:
+    """Recursively search for a media file in the extracted ZIP directory."""
+    for root, dirs, files in os.walk(base_dir):
+        for f in files:
+            if f == filename or f.lower() == filename.lower():
+                return os.path.join(root, f)
+    return None

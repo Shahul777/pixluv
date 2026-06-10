@@ -81,6 +81,16 @@ LAYOUTS = {
         "frame_w_px": 780, "frame_h_px": 780,
         "rotate": False, "label_y": 0.08,
     },
+    "4x6_frame_9": {
+        "label": "4x6 Frame (9 per sheet)",
+        "cols": 3, "rows": 3, "max_images": 9,
+        "cell_w": 4.0, "cell_h": 6.0,
+        "grid_left": 0.5, "grid_bottom": 0.5,
+        "photo_w": 3.7, "photo_h": 5.7,
+        "offset_x": 0.15, "offset_y": 0.15,
+        "frame_w_px": 1110, "frame_h_px": 1710,
+        "rotate": False, "label_y": 0.25,
+    },
 }
 
 def _apply_exif_orientation(img: Image.Image) -> Image.Image:
@@ -119,18 +129,15 @@ def _flatten_alpha(img: Image.Image) -> Image.Image:
         return background
     return img
 def _fill_frame(img: Image.Image, frame_w: int, frame_h: int,
-                offset_x: float = 0.5, offset_y: float = 0.5) -> Image.Image:
-    """Scale image to *cover* the frame (no white bars), then crop.
-    
-    offset_x / offset_y are 0.0..1.0 controlling where the crop window
-    sits on the oversized axis (0.5 = centre, 0.0 = left/top, 1.0 = right/bottom).
-    """
+                offset_x: float = 0.5, offset_y: float = 0.5,
+                zoom: float = 1.0) -> Image.Image:
+    """Scale image to cover the frame, apply extra zoom, then crop."""
     img_w, img_h = img.size
-    scale = max(frame_w / img_w, frame_h / img_h)
+    base_scale = max(frame_w / img_w, frame_h / img_h)
+    scale = base_scale * max(1.0, zoom)
     new_w = round(img_w * scale)
     new_h = round(img_h * scale)
     img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    # Crop from the oversized image using the offset
     crop_x = round((new_w - frame_w) * max(0.0, min(1.0, offset_x)))
     crop_y = round((new_h - frame_h) * max(0.0, min(1.0, offset_y)))
     img = img.crop((crop_x, crop_y, crop_x + frame_w, crop_y + frame_h))
@@ -181,16 +188,24 @@ def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
     else:
         log.warning(f"ICC profile '{cmyk_profile_path}' not found in script directory. Using naive conversion.")
         return img.convert("CMYK")
+
+
 def process_image(filepath: str, out_path: str, layout: dict,
-offset_x:float = 0.5,offset_y: float = 0.5,mode: str = "fill") -> None:
+                  offset_x: float = 0.5, offset_y: float = 0.5,
+                  mode: str = "fill", rotation: int = 0,
+                  zoom: float = 1.0) -> None:
     img = Image.open(filepath)
     img = _apply_exif_orientation(img)
     img = _flatten_alpha(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
+    # User-requested clockwise rotation (0, 90, 180, 270)
+    rotation = int(rotation) % 360 if rotation else 0
+    if rotation in (90, 180, 270):
+        img = img.rotate(-rotation, expand=True)
     if layout["rotate"]:
         w, h = img.size
-        if w > h:
+        if w > h and rotation == 0:
             img = img.rotate(-90, expand=True)
         if mode == "fit":
             img = _fit_to_frame(img, layout["frame_w_px"], layout["frame_h_px"])
@@ -198,7 +213,7 @@ offset_x:float = 0.5,offset_y: float = 0.5,mode: str = "fill") -> None:
             fill_ox = offset_y
             fill_oy = 1.0 - offset_x
             img = _fill_frame(img, layout["frame_w_px"], layout["frame_h_px"],
-                              fill_ox, fill_oy)
+                              fill_ox, fill_oy, zoom)
         img = img.rotate(-90, expand=True)
     else:
         if mode == "fit":
@@ -281,10 +296,12 @@ offsets: list[dict] | None = None) -> None:
             try:
                 tmp_path = os.path.join(tmp_dir, f"img_{idx:02d}.jpg")
                 off = (offsets[idx] if offsets and idx < len(offsets)
-                   else {"x": 0.5, "y": 0.5, "mode": "fill"})
+                   else {"x": 0.5, "y": 0.5, "mode": "fill", "rotation":0,"zoom": 1.0})
                 process_image(src, tmp_path, layout,
                           off.get("x", 0.5), off.get("y", 0.5),
-                          mode=off.get("mode", "fill"))
+                          mode=off.get("mode", "fill"),
+                          rotation=off.get("rotation", 0),
+                          zoom=off.get("zoom", 1.0))
                 tmp_files.append(tmp_path)
                 processed.append(tmp_path)
             except Exception:

@@ -684,13 +684,14 @@ def _run_module1(folder_path: str, task_id: str):
             boards_4x3 = sum(1 for item in sorted_list if item["variant"] == "4x3")
             boards_3x2 = sum(1 for item in sorted_list if item["variant"] == "3x2")
             boards_3x3 = sum(1 for item in sorted_list if item["variant"] == "3x3")
-
+            boards_4x6 = sum(1 for item in sorted_list if item["variant"] == "4x6")
             summary_header = (
                     f"Orders: {num_orders}\n"
                  f"Total Boards: {total_boards}\n"
                     f"4x3 Boards: {boards_4x3}\n"
                      f"3x2 Boards: {boards_3x2}\n"
                         f"3x3 Boards: {boards_3x3}\n"
+                          f"4x6 Boards: {boards_4x6}\n"
                     f"{'=' * 40}\n"
                         )
             
@@ -716,6 +717,7 @@ def _run_module1(folder_path: str, task_id: str):
         "boards_4x3": boards_4x3,
         "boards_3x2": boards_3x2,
         "boards_3x3": boards_3x3,
+        "boards_4x6": boards_4x6,
                   "elapsed": elapsed_total,
               })
 
