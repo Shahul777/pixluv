@@ -3013,9 +3013,28 @@ applyZoom();  // applyZoom clamps to minimum
       var oy = rangeY > 0 ? (-cd.offY / rangeY) : 0.5;
       ox = Math.max(0, Math.min(1, ox));
       oy = Math.max(0, Math.min(1, oy));
+      
+
+var rot = cd.rotation || 0;
+var finalX = ox, finalY = oy;
+if (!_rotatedView && rot) {
+    if (rot === 90) {
+        finalX = oy;
+        finalY = 1.0 - ox;
+    } else if (rot === 180) {
+        finalX = 1.0 - ox;
+        finalY = 1.0 - oy;
+    } else if (rot === 270) {
+        finalX = 1.0 - oy;
+        finalY = ox;
+    }
+}
+      
+      
+      
       return {
-        x: Math.round(ox * 1000) / 1000,
-        y: Math.round(oy * 1000) / 1000,
+x: Math.round(finalX * 1000) / 1000,
+        y: Math.round(finalY * 1000) / 1000,
         mode: cd.mode,
         rotation: cd.rotation || 0,
         zoom: Math.round(cd.zoom * 100) / 100

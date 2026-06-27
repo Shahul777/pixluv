@@ -10,7 +10,8 @@ from pathlib import Path
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 
-from PIL import Image, ExifTags, ImageCms
+from PIL import Image, ExifTags, ImageCms,ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from reportlab.lib.units import inch
 from reportlab.lib.colors import CMYKColor
 from reportlab.pdfgen import canvas
@@ -31,7 +32,7 @@ log = logging.getLogger("basa-web")
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 600 * 1024 * 1024
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 if HEIC_SUPPORTED:
     SUPPORTED_EXTENSIONS |= {".heic", ".heif"}
 
