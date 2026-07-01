@@ -359,6 +359,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <button class="tab-btn" data-tab="tab-m2">&#128230; Shipping Labels</button>
     <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
     <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button>
+    <button class="tab-btn" data-tab="tab-amz">&#128230;Amazon Download</button>
 </div>
 </nav>
 
@@ -616,6 +617,121 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     </div>
 </div>
 </div>
+<div class="tab-panel" id="tab-amz">
+  <div class="module-card" id="amzCard">
+    <div class="module-header">
+      <div class="step-circle" id="amzCircle">&#128230;</div>
+      <span class="module-title">
+        Amazon Order Download
+        <span class="status-pill pill-pending" id="amzPill">Ready</span>
+      </span>
+    </div>
+    <p class="module-desc">
+      Automates downloading customisation zip files from <strong>Amazon Seller Central</strong>.
+      Set a base folder, select the ship-by day, and the tool navigates Seller Central,
+      creates named folders, and downloads zips for each order variant.
+    </p>
+
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="amzBase">Base Folder (ship-date image folder)</label>
+        <input type="text" class="form-input" id="amzBase" placeholder="C:\Users\you\Desktop\ship-1-7-image">
+      </div>
+      <div>
+        <button id="amzSaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group" style="max-width:160px;">
+        <label for="amzShipDay">Ship By Day</label>
+        <select class="form-input" id="amzShipDay">
+          <option value="Mon">Monday</option>
+          <option value="Tue">Tuesday</option>
+          <option value="Wed">Wednesday</option>
+          <option value="Thu">Thursday</option>
+          <option value="Fri">Friday</option>
+          <option value="Sat">Saturday</option>
+          <option value="Sun">Sunday</option>
+        </select>
+      </div>
+      <div>
+        <button id="amzBrowserBtn" class="btn btn-outline" style="padding:10px 18px;">&#127760; Launch Browser</button>
+      </div>
+      <div>
+        <button id="amzRunBtn" class="btn btn-success">&#9654; Download Orders</button>
+      </div>
+      <div>
+        <button id="amzStopBtn" class="btn btn-outline" style="padding:10px 16px; display:none; color:#f87171; border-color:rgba(239,68,68,0.3);">&#9724; Stop</button>
+      </div>
+    </div>
+
+    <div id="amzBrowserStatus" style="margin-top:10px; font-size:.78rem; color: #888;"></div>
+
+    <div class="progress-section" id="amzProgress">
+      <div class="stage-timeline" id="amzStages">
+        <span class="stage-chip" data-stage="browser">Browser</span>
+        <span class="stage-chip" data-stage="login">Login</span>
+        <span class="stage-chip" data-stage="navigate">Navigate</span>
+        <span class="stage-chip" data-stage="scan">Scan</span>
+        <span class="stage-chip" data-stage="process">Process</span>
+        <span class="stage-chip" data-stage="download">Download</span>
+        <span class="stage-chip" data-stage="done">Done</span>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-fill" id="amzBar"></div>
+          <div class="progress-pct" id="amzPct">0%</div>
+        </div>
+      </div>
+
+      <div class="progress-meta">
+        <div class="progress-stage">
+          <div class="stage-dot" id="amzDot"></div>
+          <span id="amzStageLabel">Starting...</span>
+        </div>
+        <span id="amzEta"></span>
+      </div>
+
+      <div class="progress-detail" id="amzDetail"></div>
+    </div>
+
+    <div class="summary-card" id="amzSummary">
+      <h4>&#10003; Download Complete</h4>
+      <div class="summary-grid">
+        <div class="summary-item">Orders Found: <span id="amzSumTotal">-</span></div>
+        <div class="summary-item">Downloaded: <span id="amzSumDownloaded">-</span></div>
+        <div class="summary-item">Skipped: <span id="amzSumSkipped">-</span></div>
+        <div class="summary-item">Errors: <span id="amzSumErrors">-</span></div>
+        <div class="summary-item">Time: <span id="amzSumTime">-</span></div>
+      </div>
+    </div>
+
+    <div class="table-section" id="amzTable">
+      <div class="table-title">
+        Processed Orders
+        <span class="count-badge" id="amzCount">0</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Order ID</th>
+              <th>Name</th>
+              <th>Variants</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="amzTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+
 
 <div class="tab-panel active" id="tab-m5">
 <div class="module-card" id="m5Card">
@@ -3214,6 +3330,249 @@ x: Math.round(finalX * 1000) / 1000,
       });
     });
 })();
+
+
+</script>
+
+<script>
+(function() {
+    var $base = document.getElementById('amzBase');
+    var $saveBase = document.getElementById('amzSaveBase');
+    var $shipDay = document.getElementById('amzShipDay');
+    var $browserBtn = document.getElementById('amzBrowserBtn');
+    var $browserStatus = document.getElementById('amzBrowserStatus');
+    var $runBtn = document.getElementById('amzRunBtn');
+    var $stopBtn = document.getElementById('amzStopBtn');
+    var $progress = document.getElementById('amzProgress');
+    var $bar = document.getElementById('amzBar');
+    var $pct = document.getElementById('amzPct');
+    var $stageLabel = document.getElementById('amzStageLabel');
+    var $detail = document.getElementById('amzDetail');
+    var $summary = document.getElementById('amzSummary');
+    var $table = document.getElementById('amzTable');
+    var $tbody = document.getElementById('amzTbody');
+    var $count = document.getElementById('amzCount');
+    var $pill = document.getElementById('amzPill');
+    var $dot = document.getElementById('amzDot');
+    var $eta = document.getElementById('amzEta');
+
+    var currentTaskId = null;
+    var evtSource = null;
+    var startTime = null;
+
+    // Load saved base folder
+    fetch('/amazon-download/base-folder')
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if(d.base_folder) $base.value = d.base_folder; })
+        .catch(function(){});
+
+    // Check browser status on load
+    function checkBrowser() {
+        fetch('/amazon-download/browser-status')
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if(d.running) {
+                    $browserStatus.innerHTML = '<span style="color:#34d399;">&#9679;</span> Browser connected';
+                    $browserBtn.textContent = '✓ Browser Ready';
+                    $browserBtn.disabled = true;
+                } else {
+                    $browserStatus.innerHTML = '<span style="color:#888;">&#9675;</span> Browser not running';
+                    $browserBtn.innerHTML = '&#127760; Launch Browser';
+                    $browserBtn.disabled = false;
+                }
+            })
+            .catch(function(){});
+    }
+    checkBrowser();
+
+    // Save base folder
+    $saveBase.addEventListener('click', function() {
+        var folder = $base.value.trim();
+        if(!folder) { showAlert('danger', 'Enter a base folder path.'); return; }
+        fetch('/amazon-download/base-folder', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({base_folder: folder})
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if(d.status==='ok') showAlert('success', 'Base folder saved.');
+            else showAlert('danger', d.error || 'Failed to save.');
+        })
+        .catch(function(e){ showAlert('danger', e.message); });
+    });
+
+    // Launch browser
+    $browserBtn.addEventListener('click', function() {
+        $browserBtn.disabled = true;
+        $browserBtn.textContent = 'Launching...';
+        $browserStatus.innerHTML = '<span style="color:#fbbf24;">&#9679;</span> Starting browser...';
+        fetch('/amazon-download/launch-browser', { method: 'POST' })
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if(d.status==='ok' || d.status==='already_running') {
+                    $browserStatus.innerHTML = '<span style="color:#34d399;">&#9679;</span> Browser connected' + (d.message ? ' - ' + d.message : '');
+                    $browserBtn.textContent = '✓ Browser Ready';
+                } else {
+                    $browserStatus.innerHTML = '<span style="color:#f87171;">&#9679;</span> ' + (d.error || 'Failed');
+                    $browserBtn.innerHTML = '&#127760; Launch Browser';
+                    $browserBtn.disabled = false;
+                }
+            })
+            .catch(function(e){
+                $browserStatus.innerHTML = '<span style="color:#f87171;">&#9679;</span> Error: ' + e.message;
+                $browserBtn.innerHTML = '&#127760; Launch Browser';
+                $browserBtn.disabled = false;
+            });
+    });
+
+    // Set stage chips
+    function setStage(stage) {
+        var chips = document.querySelectorAll('#amzStages .stage-chip');
+        var found = false;
+        chips.forEach(function(c) {
+            if(c.dataset.stage === stage) { c.classList.add('active'); found = true; }
+            else if(!found) { c.classList.add('done'); c.classList.remove('active'); }
+            else { c.classList.remove('active', 'done'); }
+        });
+    }
+
+    // Start download
+    $runBtn.addEventListener('click', function() {
+        var base = $base.value.trim();
+        if(!base) { showAlert('danger', 'Set and save a base folder first.'); return; }
+        var day = $shipDay.value;
+
+        $runBtn.disabled = true;
+        $stopBtn.style.display = 'inline-block';
+        $progress.style.display = 'block';
+        $summary.style.display = 'none';
+        $table.style.display = 'none';
+        $tbody.innerHTML = '';
+                $bar.style.width = '0%';
+        $pct.textContent = '0%';
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+        startTime = Date.now();
+
+        // Reset stage chips
+        document.querySelectorAll('#amzStages .stage-chip').forEach(function(c){ c.classList.remove('active','done'); });
+
+        fetch('/amazon-download/start', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ship_day: day})
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if(d.task_id) {
+                currentTaskId = d.task_id;
+                connectSSE(d.task_id);
+            } else {
+                showAlert('danger', d.error || 'Failed to start.');
+                resetUI();
+            }
+        })
+        .catch(function(e){ showAlert('danger', e.message); resetUI(); });
+    });
+
+    // SSE progress
+    function connectSSE(taskId) {
+        if(evtSource) evtSource.close();
+        evtSource = new EventSource('/amazon-download/progress/' + taskId);
+        var orderRows = {};
+
+        evtSource.onmessage = function(e) {
+            var d;
+            try { d = JSON.parse(e.data); } catch(x) { return; }
+
+            if(d.stage) {
+                setStage(d.stage);
+                $stageLabel.textContent = d.stage_label || d.stage;
+                if(d.stage === 'done') {
+                    $dot.style.background = '#34d399';
+                } else {
+                    $dot.style.background = '#60a5fa';
+                }
+            }
+
+            if(d.progress !== undefined) {
+                var p = Math.round(d.progress);
+                $bar.style.width = p + '%';
+                $pct.textContent = p + '%';
+            }
+
+            if(d.detail) {
+                $detail.textContent = d.detail;
+            }
+
+            if(d.order) {
+                $table.style.display = 'block';
+                var o = d.order;
+                var key = o.order_id + '-' + (o.variant||'');
+                if(!orderRows[key]) {
+                    var row = document.createElement('tr');
+                    var idx = Object.keys(orderRows).length + 1;
+                    row.innerHTML = '<td>' + idx + '</td><td>' + (o.order_id||'') + '</td><td>' + (o.name||'') + '</td><td>' + (o.variant||'') + '</td><td class="amz-status"></td>';
+                    $tbody.appendChild(row);
+                    orderRows[key] = row;
+                }
+                var statusCell = orderRows[key].querySelector('.amz-status');
+                if(o.status === 'downloaded') statusCell.innerHTML = '<span style="color:#34d399;">&#10003; Downloaded</span>';
+                else if(o.status === 'skipped') statusCell.innerHTML = '<span style="color:#fbbf24;">&#8212; Skipped</span>';
+                else if(o.status === 'error') statusCell.innerHTML = '<span style="color:#f87171;">&#10007; Error</span>';
+                else statusCell.textContent = o.status || '...';
+                $count.textContent = Object.keys(orderRows).length;
+            }
+
+            if(d.complete) {
+                evtSource.close();
+                evtSource = null;
+                $summary.style.display = 'block';
+                $pill.className = 'status-pill pill-done';
+                $pill.innerHTML = '&#10003; Done';
+                var elapsed = ((Date.now() - startTime)/1000).toFixed(0);
+                document.getElementById('amzSumTotal').textContent = d.total || '0';
+                document.getElementById('amzSumDownloaded').textContent = d.downloaded || '0';
+                document.getElementById('amzSumSkipped').textContent = d.skipped || '0';
+                document.getElementById('amzSumErrors').textContent = d.errors || '0';
+                document.getElementById('amzSumTime').textContent = elapsed + 's';
+                resetUI();
+            }
+
+            if(d.error) {
+                showAlert('danger', d.error);
+                if(evtSource) { evtSource.close(); evtSource = null; }
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Error';
+                resetUI();
+            }
+        };
+
+        evtSource.onerror = function() {
+            evtSource.close();
+            evtSource = null;
+        };
+    }
+
+    // Stop
+    $stopBtn.addEventListener('click', function() {
+        if(currentTaskId) {
+            fetch('/amazon-download/stop/' + currentTaskId, { method: 'POST' });
+        }
+        if(evtSource) { evtSource.close(); evtSource = null; }
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Stopped';
+        resetUI();
+    });
+
+    function resetUI() {
+        $runBtn.disabled = false;
+        $stopBtn.style.display = 'none';
+        currentTaskId = null;
+    }
+})();
+
 </script>
 
 </body>

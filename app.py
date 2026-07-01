@@ -1177,6 +1177,9 @@ from polaroid_tool import polaroid_bp        # noqa: E402
 app.register_blueprint(polaroid_bp)
 
 # --- Module 6: Final Label ---
+from amazon_download import amazon_bp        # noqa: E402
+app.register_blueprint(amazon_bp)
+
 
 _M6_SETTING_BASE = "m6_base_folder"
 
