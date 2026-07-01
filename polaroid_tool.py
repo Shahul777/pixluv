@@ -223,7 +223,7 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
 
         order_dirs = []
         for d in sorted(ship_folder.iterdir(), key=lambda x: x.name.lower()):
-            if d.is_dir():
+            if d.is_dir() and d.name.lower() != "whatsapp":
                 order_dirs.append(d)
 
         if not order_dirs:

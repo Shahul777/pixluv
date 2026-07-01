@@ -1730,3 +1730,549 @@ def ad_stop(task_id: str):
             return jsonify({"ok": True, "message": "Stop signal sent."})
         return jsonify({"error": "Task not found."}), 404
         
+WA_BROWSER_DATA_DIR = Path(__file__).parent / ".whatsapp_browser_data"
+SETTING_WA_GROUP = "amazon_download_wa_group"
+
+_wa_playwright = None
+_wa_context = None
+_wa_lock = threading.Lock()
+
+def _ensure_wa_dir():
+    WA_BROWSER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+def _close_wa_browser():
+    global _wa_playwright, _wa_context
+    with _wa_lock:
+        if _wa_context:
+            try:
+                _wa_context.close()
+            except Exception:
+                pass
+            _wa_context = None
+        if _wa_playwright:
+            try:
+                _wa_playwright.stop()
+            except Exception:
+                pass
+            _wa_playwright = None
+
+@amazon_bp.route("/amazon-download/wa-launch", methods=["POST"])
+def ad_wa_launch():
+    """Launch WhatsApp Web browser for QR login."""
+    try:
+        _close_wa_browser()
+
+        from playwright.sync_api import sync_playwright
+        
+        _ensure_wa_dir()
+        pw = sync_playwright().start()
+        context = pw.chromium.launch_persistent_context(
+            user_data_dir=str(WA_BROWSER_DATA_DIR),
+            headless=False,
+            viewport={"width": 1300, "height": 850},
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ],
+            ignore_default_args=["--enable-automation"],
+            channel="chromium",
+        )
+
+        pages = context.pages
+        page = pages[0] if pages else context.new_page()
+        try:
+            page.goto("https://web.whatsapp.com", wait_until="domcontentloaded", timeout=20000)
+        except Exception:
+            pass
+
+        global _wa_playwright, _wa_context
+        with _wa_lock:
+            _wa_playwright = pw
+            _wa_context = context
+
+        return jsonify({"status": "ok", "message": "WhatsApp Web launched. Scan QR if needed."})
+    except Exception as e:
+        return jsonify({"error": f"Failed: {e}"}), 500
+
+@amazon_bp.route("/amazon-download/wa-status", methods=["GET"])
+def ad_wa_status():
+    """Check if WhatsApp Web browser is running."""
+    with _wa_lock:
+        if _wa_context:
+            try:
+                _wa_context.pages
+                return jsonify({"running": True})
+            except Exception:
+                pass
+        return jsonify({"running": False})
+
+@amazon_bp.route("/amazon-download/wa-group", methods=["POST"])
+def ad_wa_set_group():
+    """Save the WhatsApp group name."""
+    data = request.get_json(silent=True) or {}
+    group = (data.get("group_name") or "").strip()
+    if not group:
+        return jsonify({"error": "Group name required."}), 400
+    
+    set_setting(SETTING_WA_GROUP, group)
+    return jsonify({"status": "ok", "group": group})
+
+@amazon_bp.route("/amazon-download/wa-group", methods=["GET"])
+def ad_wa_get_group():
+    """Get saved WhatsApp group name."""
+    group = get_setting(SETTING_WA_GROUP, "")
+    return jsonify({"group_name": group})
+
+@amazon_bp.route("/amazon-download/wa-sync", methods=["POST"])
+def ad_wa_sync():
+    """Start syncing WhatsApp media to order folders."""
+    base_folder = get_setting(SETTING_BASE_FOLDER, "")
+    if not base_folder or not Path(base_folder).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    group_name = get_setting(SETTING_WA_GROUP, "")
+    if not group_name:
+        return jsonify({"error": "WhatsApp group name not set."}), 400
+
+    task_id = f"wasync_{int(time.time() * 1000)}"
+    _new_q(task_id)
+
+    thread = threading.Thread(
+        target=_run_wa_sync, args=(base_folder, group_name, task_id), daemon=True
+    )
+    thread.start()
+    
+    return jsonify({"task_id": task_id, "group": group_name})
+
+@amazon_bp.route("/amazon-download/wa-progress/<task_id>")
+def ad_wa_progress(task_id: str):
+    """SSE stream for WhatsApp sync progress."""
+    def generate():
+        q = _get_q(task_id)
+        if q is None:
+            yield f"data: {json.dumps({'error': 'Unknown task_id', 'done': True})}\n\n"
+            return
+        while True:
+            try:
+                msg = q.get(timeout=30)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(msg)}\n\n"
+            if msg.get("done"):
+                _del_q(task_id)
+                break
+                
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no"})
+
+def _run_wa_sync(base_folder_path: str, group_name: str, task_id: str):
+    """Worker thread: scan WhatsApp group and download media to order folders."""
+    q = _get_q(task_id)
+    if q is None:
+        return
+
+    t0 = time.perf_counter()
+    base_folder = Path(base_folder_path)
+
+    try:
+        _emit(q, stage="browser", pct=0, detail="Launching WhatsApp Web...", done=False)
+
+        # Close any existing WA browser from another thread
+        _close_wa_browser()
+
+        from playwright.sync_api import sync_playwright
+
+        _ensure_wa_dir()
+        try:
+            pw = sync_playwright().start()
+            context = pw.chromium.launch_persistent_context(
+                user_data_dir=str(WA_BROWSER_DATA_DIR),
+                headless=False,
+                viewport={"width": 1300, "height": 850},
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ],
+                ignore_default_args=["--enable-automation"],
+                channel="chromium",
+            )
+        except Exception as e:
+            _emit(q, stage="error", pct=0, detail="", done=True,
+                  error=f"Failed to launch browser: {e}")
+            return
+
+        global _wa_playwright, _wa_context
+        with _wa_lock:
+            _wa_playwright = pw
+            _wa_context = context
+            
+        pages = context.pages
+        page = pages[0] if pages else context.new_page()
+
+        # Navigate to WhatsApp Web
+        page.goto("https://web.whatsapp.com", wait_until="domcontentloaded", timeout=20000)
+
+        # Wait for WhatsApp to be ready (chat list loaded)
+        _emit(q, stage="login", pct=2, detail="Waiting for WhatsApp Web to load...", done=False)
+        try:
+            page.wait_for_selector(
+                "div[data-tab='3'], #pane-side, div[aria-label='Chat list']",
+                timeout=60000
+            )
+        except Exception:
+            # Maybe user needs to scan QR code
+            _emit(q, stage="login", pct=2,
+                  detail="Please scan the QR code in WhatsApp Web...", done=False)
+            try:
+                page.wait_for_selector(
+                    "div[data-tab='3'], #pane-side, div[aria-label='Chat list']",
+                    timeout=120000
+                )
+            except Exception:
+                _emit(q, stage="error", pct=0, detail="", done=True,
+                      error="WhatsApp Web did not load. Please scan QR and try again.")
+                return
+
+        time.sleep(2)
+        _emit(q, stage="navigate", pct=5, detail=f"Opening group: {group_name}...", done=False)
+
+        # Search for and open the group
+        if not _wa_open_group(page, group_name):
+            _emit(q, stage="error", pct=0, detail="", done=True,
+                  error=f"Could not find group: {group_name}")
+            return
+
+        time.sleep(2)
+        _emit(q, stage="scan", pct=10, detail="Scanning messages for order IDs...", done=False)
+
+        # Scan messages and build order-media map
+        order_media_map = _wa_scan_messages(page, q)
+
+        if not order_media_map:
+            _emit(q, stage="done", pct=100, done=True,
+                  detail="No order IDs with media found in recent messages.",
+                  result={"downloaded": 0, "matched": 0, "not_found": 0})
+            return
+
+        log.info("WA SYNC: Found %d order IDs with media", len(order_media_map))
+        for oid4, media_list in order_media_map.items():
+            log.info("  %s: %d media items", oid4, len(media_list))
+
+        # Match order IDs to folders and download
+        _emit(q, stage="download", pct=20, detail="Downloading media to folders...", done=False)
+
+        total_items = sum(len(v) for v in order_media_map.values())
+        downloaded = 0
+        not_found = 0
+        matched = 0
+        item_idx = 0
+
+        for oid4, media_elements in order_media_map.items():
+            if _is_stopped(task_id):
+                _emit(q, stage="stopped", pct=0, detail="Stopped by user.", done=True)
+                return
+
+            # Find matching folder in base location
+            target_folder = _find_folder_for_order(base_folder, oid4)
+            if not target_folder:
+                log.warning("  No folder found for order ID -%s", oid4)
+                not_found += len(media_elements)
+                item_idx += len(media_elements)
+                continue
+
+            matched += 1
+            log.info("  Downloading %d files -> %s", len(media_elements), target_folder.name)
+
+            for media_info in media_elements:
+                if _is_stopped(task_id):
+                    _emit(q, stage="stopped", pct=0, detail="Stopped by user.", done=True)
+                    return
+
+                item_idx += 1
+                pct = 20 + int((item_idx / total_items) * 70)
+                _emit(q, stage="download", pct=pct,
+                      detail=f"Downloading {item_idx}/{total_items} -> {target_folder.name}",
+                      done=False)
+
+                success = _wa_download_media(page, media_info, target_folder)
+                if success:
+                    downloaded += 1
+
+        elapsed = round(time.perf_counter() - t0, 1)
+        _emit(q, stage="done", pct=100, done=True,
+              detail=f"Done! {downloaded} files downloaded in {elapsed}s",
+              result={
+                  "downloaded": downloaded,
+                  "matched": matched,
+                  "not_found": not_found,
+                  "total_orders": len(order_media_map),
+                  "elapsed": elapsed,
+              })
+
+        log.info("WA SYNC DONE: %d downloaded, %d orders matched, %d not found [%.1fs]",
+                 downloaded, matched, not_found, elapsed)
+
+    except Exception as exc:
+        log.exception("WhatsApp sync failed")
+        _emit(q, stage="error", pct=0, detail="", done=True, error=str(exc))
+
+
+def _wa_open_group(page, group_name: str) -> bool:
+    try:
+        search_box = page.locator(
+            "div[role='textbox'][title='Search input textbox'], "
+            "p.selectable-text[data-tab='3']"
+        )
+
+        if search_box.count() == 0:
+            search_bar = page.locator(
+                "div[data-tab='3'][role='textbox'], "
+                "div.lexical-rich-text-input[data-tab='3'], "
+                "div[title='Search or start a new chat']"
+            )
+            if search_bar.count() > 0:
+                search_bar.first.click()
+                time.sleep(1)
+            else:
+                side_header = page.locator("#side header, div[data-tab='3']")
+                if side_header.count() > 0:
+                    side_header.first.click()
+                    time.sleep(1)
+
+            search_box = page.locator(
+                "div[role='textbox'][title='Search input textbox'], "
+                "p.selectable-text[data-tab='3'], "
+                "div[contenteditable='true'][title='Search input textbox']"
+            )
+
+        if search_box.count() > 0:
+            search_box.first.click()
+            time.sleep(0.5)
+
+            page.keyboard.press("Control+a")
+            page.keyboard.press("Backspace")
+            time.sleep(0.3)
+
+            page.keyboard.type(group_name, delay=50)
+            time.sleep(2)
+
+        group_el = page.locator(f"span[title='{group_name}']")
+        if group_el.count() > 0:
+            group_el.first.click()
+            time.sleep(2)
+            return True
+
+        # Try partial match
+        group_el = page.locator(f"span:has-text('{group_name}')")
+        if group_el.count() > 0:
+            group_el.first.click()
+            time.sleep(2)
+            return True
+
+        return False
+    except Exception as e:
+        log.error("Failed to open group '%s': %s", group_name, e)
+        return False
+def _wa_scan_messages(page, q: queue.Queue) -> dict:
+    """Scan visible messages in the chat. Returns {order_id_4: [media_info_list]}."""
+    
+    # Reads messages from bottom to top. When a 4-digit text message is found,
+    # all media messages ABOVE it (until the next 4-digit marker) belong to that order.
+    order_media_map = {}
+
+    try:
+        # Get all message elements in the chat
+        # WhatsApp messages are in a scrollable container
+        msg_container = page.locator(
+            "div[data-tab='8'], "
+            "div[role='application'], "
+            "div.copyable-area"
+        )
+
+        # Get all individual message rows
+        messages = page.locator(
+            "div.message-in, div.message-out, "
+            "div[data-pre-plain-text], "
+            "div[class*='message']"
+        )
+
+        # Fallback: get messages by role
+        if messages.count() == 0:
+            messages = page.locator("div[role='row']")
+
+        msg_count = messages.count()
+        log.info("WA SCAN: Found %d message elements", msg_count)
+
+        if msg_count == 0:
+            return {}
+
+        # Collect all messages with their type (text/media) and content
+        # Process from bottom (newest) to top (oldest)
+        collected = []
+        for i in range(msg_count - 1, -1, -1):
+            try:
+                msg_el = messages.nth(i)
+                msg_text = ""
+                is_media = False
+
+                # Check if it's a media message (image/video/document)
+                media_el = msg_el.locator(
+                    "img[src*='blob:'], img[src*='media'], "
+                    "div[data-testid='media-url-provider'], "
+                    "a[href*='blob:'], "
+                    "div[data-testid='document-thumb'], "
+                    "span[data-icon='audio-download'], "
+                    "img[data-testid='image-thumb']"
+                )
+
+                if media_el.count() > 0:
+                    is_media = True
+
+                # Also check for downloadable content
+                dl_el = msg_el.locator(
+                    "button[aria-label='Download'], "
+                    "span[data-icon='download'], "
+                    "span[data-icon='audio-download']"
+                )
+                if dl_el.count() > 0:
+                    is_media = True
+                    
+                # Get text content
+                text_el = msg_el.locator(
+                    "span.selectable-text, "
+                    "span[dir='ltr'], "
+                    "span.copyable-text"
+                )
+                if text_el.count() > 0:
+                    msg_text = text_el.first.inner_text().strip()
+
+                collected.append({
+                    "index": i,
+                    "text": msg_text,
+                    "is_media": is_media,
+                    "element_index": i,
+                })
+            except Exception:
+                continue
+
+        # Now process: find 4-digit order markers and assign media above them
+        current_order_id = None
+        current_media = []
+
+        for msg in collected:  # bottom to top
+            text = msg["text"].strip()
+
+            # Check if this is a 4-digit order ID marker
+            if re.match(r"^\d{4}$", text):
+                # Save previous order's media
+                if current_order_id and current_media:
+                    order_media_map[current_order_id] = current_media
+                current_order_id = text
+                current_media = []
+                log.info("  Found order marker: %s", text)
+            elif msg["is_media"] and current_order_id:
+                # This media belongs to the current order (above the marker)
+                current_media.append(msg)
+
+        # Save last order's media
+        if current_order_id and current_media:
+            order_media_map[current_order_id] = current_media
+
+    except Exception as e:
+        log.error("WA scan failed: %s", e)
+
+    return order_media_map
+
+
+def _wa_download_media(page, media_info: dict, target_folder: Path) -> bool:
+    """Download a single media item from WhatsApp to the target folder."""
+    try:
+        target_folder.mkdir(parents=True, exist_ok=True)
+        msg_el = page.locator(
+            "div.message-in, div.message-out, "
+            "div[data-pre-plain-text], "
+            "div[class*='message'], "
+            "div[role='row']"
+        ).nth(media_info["element_index"])
+
+        # Try to click on the media to open it
+        media_clickable = msg_el.locator(
+            "img[src*='blob:'], img[data-testid='image-thumb'], "
+            "div[data-testid='media-url-provider'], "
+            "div[role='button']"
+        )
+
+        if media_clickable.count() > 0:
+            media_clickable.first.click()
+            time.sleep(1)
+
+            # Look for download button in the lightbox/overlay
+            dl_btn = page.locator(
+                "span[data-icon='download'], "
+                "button[aria-label='Download'], "
+                "div[aria-label='Download']"
+            )
+
+            if dl_btn.count() > 0:
+                with page.expect_download(timeout=30000) as download_info:
+                    dl_btn.first.click()
+
+                download = download_info.value
+                filename = download.suggested_filename or f"media_{int(time.time()*1000)}"
+                download.save_as(str(target_folder / filename))
+                log.info("      Downloaded: %s", filename)
+
+                # Close the overlay
+                close_btn = page.locator(
+                    "span[data-icon='x'], button[aria-label='Close']"
+                )
+                if close_btn.count() > 0:
+                    close_btn.first.click()
+                    time.sleep(0.5)
+
+                return True
+
+        # Fallback: try direct download button on message
+        dl_btn = msg_el.locator(
+            "button[aria-label='Download'], "
+            "span[data-icon='download']"
+        )
+        if dl_btn.count() > 0:
+            with page.expect_download(timeout=30000) as download_info:
+                dl_btn.first.click()
+
+            download = download_info.value
+            filename = download.suggested_filename or f"media_{int(time.time()*1000)}"
+            download.save_as(str(target_folder / filename))
+            log.info("      Downloaded: %s", filename)
+            return True
+
+        return False
+    except Exception as e:
+        log.warning("      Download failed: %s", e)
+        return False
+
+
+def _find_folder_for_order(base_folder: Path, order_id_4: str) -> Path | None:
+    """Find the folder in base_folder that matches the given 4-digit order ID."""
+    tag = f"-{order_id_4}"
+
+    # Check base folder
+    if base_folder.exists():
+        for d in base_folder.iterdir():
+            if d.is_dir() and d.name != "WhatsApp" and tag in d.name.lower():
+                return d
+
+    # Check WhatsApp subfolder
+    wa_dir = base_folder / "WhatsApp"
+    if wa_dir.exists():
+        for d in wa_dir.iterdir():
+            if d.is_dir() and tag in d.name.lower():
+                return d
+
+    return None
+            

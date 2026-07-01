@@ -732,6 +732,85 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 </div>
 
 
+<div class="module-card" id="waCard" style="margin-top:24px;">
+    <div class="module-header">
+        <div class="step-circle" style="background: rgba(37,211,102,0.15); color: #25d366;">&#128172;</div>
+        <span class="module-title">
+            WhatsApp Sync
+            <span class="status-pill pill-pending" id="waPill">Ready</span>
+        </span>
+    </div>
+    <p class="module-desc">
+        Downloads media from a WhatsApp Web group chat into the correct order folders.
+        Messages follow the pattern: <em>images/documents → 4-digit order ID</em>.
+        Media above each order ID is saved into the matching folder.
+    </p>
+
+    <div class="form-row" style="margin-bottom:14px;">
+        <div class="form-group">
+            <label for="waGroup">Group Name</label>
+            <input type="text" class="form-input" id="waGroup" placeholder="e.g. Print Orders">
+        </div>
+        <div>
+            <button id="waSaveGroup" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div>
+            <button id="waLaunchBtn" class="btn btn-outline" style="padding:10px 18px; background: rgba(37,211,102,0.08); border-color: rgba(37,211,102,0.3); color: #25d366;">&#127760; Launch WhatsApp</button>
+        </div>
+        <div>
+            <button id="waSyncBtn" class="btn btn-success" style="background: #25d366; border-color: #25d366;">&#9654; Sync Media</button>
+        </div>
+        <div>
+            <button id="waStopBtn" class="btn btn-outline" style="padding:10px 16px; display:none; color: #f87171; border-color: rgba(239,68,68,0.3);">&#9724; Stop</button>
+        </div>
+    </div>
+
+    <div id="waBrowserStatus" style="margin-top:10px; font-size:.78rem; color: #888;"></div>
+
+    <div class="progress-section" id="waProgress" style="display:none;">
+        <div class="stage-timeline" id="waStages">
+            <span class="stage-chip" data-stage="browser">Browser</span>
+            <span class="stage-chip" data-stage="login">Login</span>
+            <span class="stage-chip" data-stage="navigate">Navigate</span>
+            <span class="stage-chip" data-stage="scan">Scan</span>
+            <span class="stage-chip" data-stage="download">Download</span>
+            <span class="stage-chip" data-stage="done">Done</span>
+        </div>
+
+        <div style="margin-top:14px;">
+            <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" id="waBar"></div>
+                <div class="progress-pct" id="waPct">0%</div>
+            </div>
+        </div>
+
+        <div class="progress-meta">
+            <div class="progress-stage">
+                <div class="stage-dot" id="waDot"></div>
+                <span id="waStageLabel">Starting...</span>
+            </div>
+        </div>
+
+        <div class="progress-detail" id="waDetail"></div>
+    </div>
+
+    <div class="summary-card" id="waSummary" style="display:none;">
+        <h4>&#10003; WhatsApp Sync Complete</h4>
+        <div class="summary-grid">
+            <div class="summary-item">Orders Found: <span id="waSumOrders">-</span></div>
+            <div class="summary-item">Matched: <span id="waSumMatched">-</span></div>
+            <div class="summary-item">Downloaded: <span id="waSumDownloaded">-</span></div>
+            <div class="summary-item">Not Found: <span id="waSumNotFound">-</span></div>
+            <div class="summary-item">Time: <span id="waSumTime">-</span></div>
+        </div>
+    </div>
+</div>
+
+
+</div>
 
 <div class="tab-panel active" id="tab-m5">
 <div class="module-card" id="m5Card">
@@ -3572,9 +3651,183 @@ x: Math.round(finalX * 1000) / 1000,
         currentTaskId = null;
     }
 })();
+</script>
 
+<script>
+(function() {
+    var $group = document.getElementById('waGroup');
+    var $saveGroup = document.getElementById('waSaveGroup');
+    var $launchBtn = document.getElementById('waLaunchBtn');
+    var $syncBtn = document.getElementById('waSyncBtn');
+    var $stopBtn = document.getElementById('waStopBtn');
+    var $browserStatus = document.getElementById('waBrowserStatus');
+    var $progress = document.getElementById('waProgress');
+    var $bar = document.getElementById('waBar');
+    var $pct = document.getElementById('waPct');
+    var $stageLabel = document.getElementById('waStageLabel');
+    var $detail = document.getElementById('waDetail');
+    var $summary = document.getElementById('waSummary');
+    var $pill = document.getElementById('waPill');
+    var $dot = document.getElementById('waDot');
+
+    var currentTaskId = null;
+    var evtSource = null;
+
+    // Load saved group name
+    fetch('/amazon-download/wa-group')
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if(d.group_name) $group.value = d.group_name; })
+        .catch(function(){});
+
+    // Check WA browser status
+    function checkWaBrowser() {
+        fetch('/amazon-download/wa-status')
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if(d.running) {
+                    $browserStatus.innerHTML = '<span style="color:#25d366;">&#9679;</span> WhatsApp browser connected';
+                    $launchBtn.textContent = '✓ WhatsApp Ready';
+                } else {
+                    $browserStatus.innerHTML = '<span style="color:#888;">&#9675;</span> WhatsApp browser not running';
+                    $launchBtn.innerHTML = '&#127760; Launch WhatsApp';
+                }
+            })
+            .catch(function(){});
+    }
+    checkWaBrowser();
+
+    // Save group name
+    $saveGroup.addEventListener('click', function() {
+        var group = $group.value.trim();
+        if (!group) return alert('Enter a group name.');
+        fetch('/amazon-download/wa-group', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({group_name: group})
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if(d.error) alert(d.error);
+            else { $saveGroup.textContent = '✓ Saved'; setTimeout(function(){ $saveGroup.innerHTML = '&#128190; Save'; }, 2000); }
+        })
+        .catch(function(e){ alert('Error: ' + e); });
+    });
+
+    // Launch WhatsApp browser
+    $launchBtn.addEventListener('click', function() {
+        $launchBtn.disabled = true;
+        $launchBtn.textContent = 'Launching...';
+        $browserStatus.innerHTML = '<span style="color:#f59e0b;">&#9679;</span> Launching WhatsApp Web...';
+        fetch('/amazon-download/wa-launch', {method: 'POST'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if(d.error) {
+                alert(d.error);
+                $launchBtn.disabled = false;
+                $launchBtn.innerHTML = '&#127760; Launch WhatsApp';
+            } else {
+                $browserStatus.innerHTML = '<span style="color:#25d366;">&#9679;</span> ' + d.message;
+                $launchBtn.textContent = '✓ WhatsApp Ready';
+            }
+        })
+        .catch(function(e){ alert('Error: ' + e); $launchBtn.disabled = false; });
+    });
+
+    // Start sync
+    $syncBtn.addEventListener('click', function() {
+        if (!$group.value.trim()) return alert('Set a WhatsApp group name first.');
+
+        $syncBtn.disabled = true;
+        $stopBtn.style.display = 'inline-block';
+        $progress.style.display = 'block';
+        $summary.style.display = 'none';
+        $pill.className = 'status-pill pill-active';
+        $pill.textContent = 'Syncing...';
+
+        fetch('/amazon-download/wa-sync', {method: 'POST'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            if(d.error) {
+                alert(d.error);
+                resetUI();
+                return;
+            }
+            currentTaskId = d.task_id;
+            listenProgress(d.task_id);
+        })
+        .catch(function(e){ alert('Error: ' + e); resetUI(); });
+    });
+
+    function listenProgress(taskId) {
+        if(evtSource) evtSource.close();
+        evtSource = new EventSource('/amazon-download/wa-progress/' + taskId);
+        evtSource.onmessage = function(ev) {
+            var msg = JSON.parse(ev.data);
+            if(msg.error) {
+                evtSource.close();
+                $detail.textContent = '❌ ' + msg.error;
+                $pill.className = 'status-pill pill-error';
+                $pill.textContent = 'Error';
+                resetUI();
+                return;
+            }
+
+            // Update stage chips
+            var chips = document.querySelectorAll('#waStages .stage-chip');
+            chips.forEach(function(c){ c.classList.remove('active', 'completed'); });
+
+            chips.forEach(function(c){
+                var s = c.getAttribute('data-stage');
+                if(s === msg.stage) c.classList.add('active');
+            });
+
+            // Update progress bar
+            if(msg.pct !== undefined) {
+                $bar.style.width = msg.pct + '%';
+                $pct.textContent = msg.pct + '%';
+            }
+            if(msg.stage) $stageLabel.textContent = msg.stage.charAt(0).toUpperCase() + msg.stage.slice(1);
+            if(msg.detail) $detail.textContent = msg.detail;
+
+            if(msg.done) {
+                evtSource.close();
+                $pill.className = 'status-pill pill-success';
+                $pill.textContent = 'Done';
+                $stopBtn.style.display = 'none';
+                $syncBtn.disabled = false;
+
+                if(msg.result) {
+                    $summary.style.display = 'block';
+                    document.getElementById('waSumOrders').textContent = msg.result.total_orders || 0;
+                    document.getElementById('waSumMatched').textContent = msg.result.matched || 0;
+                    document.getElementById('waSumDownloaded').textContent = msg.result.downloaded || 0;
+                    document.getElementById('waSumNotFound').textContent = msg.result.not_found || 0;
+                    document.getElementById('waSumTime').textContent = (msg.result.elapsed || 0) + 's';
+                }
+            }
+        };
+        evtSource.onerror = function() {
+            evtSource.close();
+            resetUI();
+        };
+    }
+
+    // Stop
+    $stopBtn.addEventListener('click', function() {
+        if(!currentTaskId) return;
+        fetch('/amazon-download/stop/' + currentTaskId, {method: 'POST'});
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Stopped';
+        resetUI();
+    });
+
+    function resetUI() {
+        $syncBtn.disabled = false;
+        $stopBtn.style.display = 'none';
+        currentTaskId = null;
+    }
+})();
 </script>
 
 </body>
 </html>
-                
