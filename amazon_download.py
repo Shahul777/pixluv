@@ -367,15 +367,12 @@ def _scrape_order_list(page, ship_day: str, q: queue.Queue) -> list[dict]:
     # Wait for the orders table to load
     try:
         page.wait_for_selector(
-            "table, .orders-table, [data-test-id='order-list'], .myo-table",
+            "a[href*='orders-v3/order/']",
             timeout=10000
         )
+ 
     except Exception:
-        # Try alternative: wait for any order link
-        try:
-            page.wait_for_selector("a[href*='orders-v3/order/']", timeout=8000)
-        except Exception:
-            pass
+        pass
             
     time.sleep(1)
     
@@ -383,105 +380,81 @@ def _scrape_order_list(page, ship_day: str, q: queue.Queue) -> list[dict]:
     # Amazon order IDs are in format: XXX-XXXXXXX-XXXXXXX
     order_links = page.locator("a[href*='orders-v3/order/']")
     link_count = order_links.count()
-    
-    log.info("Found %d order links on page", link_count)
-    
-    if link_count == 0:
-        # Try to get text content and look for order IDs
-        content = page.content()
-        order_id_matches = re.findall(r"\d{3}-\d{7}-\d{7}", content)
-        log.info("Found %d order IDs via regex in page content", len(order_id_matches))
+    seen_ids = set()
 
-    # Extract order information from each row
-    # We'll look at the page structure more broadly
-    page_content = page.content()
-    
-    # Find all order IDs on the page
-    order_id_pattern = re.compile(r"(\d{3}-\d{7}-\d{7})")
-    found_ids = list(set(order_id_pattern.findall(page_content)))
-    log.info("Unique order IDs found: %s", found_ids)
-    
-    # For each order ID, try to find its ship date and product info
-    for order_id in found_ids:
-        order_id_4 = order_id[-4:]  # Last 4 digits
-        
-        # Try to find the row/section containing this order
-        # Look for the ship-by date near this order ID
-        order_section = page.locator(f"tr:has(a[href*='{order_id}']), "
-                                     f"div:has(a[href*='{order_id}'])")
-                                     
-        ship_text = ""
-        items = []
-        
+    for li in range(link_count):
         try:
-            if order_section.count() > 0:
-                section_text = order_section.first.inner_text()
-                
-                # Extract ship day
-                ship_text = section_text
-                
-                # Extract product titles from this section
-                # Look for product name links
-                product_links = order_section.first.locator(
-                    "a[href*='catalog'], a[href*='product'], .product-name-column a, "
-                    "td:nth-child(5) a, td:nth-child(4) a"
-                )
-                for i in range(product_links.count()):
-                    try:
-                        title = product_links.nth(i).inner_text().strip()
-                        if title and len(title) > 10:
-                            variant = _detect_variant_from_title(title)
-                            items.append({"title": title, "variant": variant})
-                    except Exception:
-                        continue
-        except Exception as e:
-            log.warning("Error extracting order section for %s: %s", order_id, e)
-            
-        # If we couldn't get items from the section, try broader search
-        if not items:
-            # Look for product titles near this order ID in the HTML
-            # Find text blocks mentioning standard product patterns
-            section_html = ""
-            try:
-                # Get a broader context around the order link
-                order_link_el = page.locator(f"a[href*='{order_id}']").first
-                parent = order_link_el.locator("xpath=ancestor::tr[1]")
-                if parent.count() > 0:
-                    section_html = parent.first.inner_text()
-                else:
-                    parent = order_link_el.locator("xpath=ancestor::div[contains(@class,'order')]")
-                    if parent.count() > 0:
-                        section_html = parent.first.inner_text()
-            except Exception:
-                pass
-                
-            if section_html:
-                ship_text = section_html
-                # Try to detect variant from the text
-                variants_found = _VARIANT_RE.findall(section_html)
-                for w, h in variants_found:
-                    key = f"{w}x{h}"
-                    if key in _KNOWN_VARIANTS:
-                        items.append({"title": section_html[:100], "variant": key})
+            link_el = order_links.nth(li)
+            href = link_el.get_attribute("href") or ""
+            # Extract order ID from href
+            m = re.search(r"(\d{3}-\d{7}-\d{7})", href)
+            if not m:
+                continue
+            order_id = m.group(1)
 
-        # Check if ship day matches
-        detected_day = _extract_ship_day(ship_text)
-        if detected_day and detected_day.lower() != ship_day.lower():
-            log.info("Order %s ship day %s != filter %s, skipping", 
-                     order_id, detected_day, ship_day)
+            # Skip duplicates (same order ID may appear multiple times on page)
+            if order_id in seen_ids:
+                continue
+            seen_ids.add(order_id)
+
+            order_id_4 = order_id[-4:]
+
+            # Navigate up to the closest <tr> ancestor for THIS order only
+            row = link_el.locator("xpath=ancestor::tr[1]")
+            if row.count() == 0:
+                # Fallback: try a smaller parent container
+                row = link_el.locator("xpath=ancestor::div[1]")
+                if row.count() == 0:
+                    continue
+
+            row_text = row.first.inner_text()
+
+            # Extract ship date from THIS row's text only
+            detected_day = _extract_ship_day(row_text)
+
+            # Extract product title from THIS row
+            # Look for the product title link in this row
+            product_link = row.first.locator(
+                "a[href*='catalog'], a[href*='product'], "
+                "td:nth-child(4) a, td:nth-child(5) a"
+            )
+            title = ""
+            if product_link.count() > 0:
+                title = product_link.first.inner_text().strip()
+
+            # If no product link found, try to extract title from row text
+            if not title:
+                # Look for PixLuv/PIXLUV pattern in row text
+                title_m = re.search(
+                    r'((?:PixLuv|Pixluv|PIXLUV)[^\|]{10,})',
+                    row_text, re.IGNORECASE
+                )
+                if title_m:
+                    title = title_m.group(1).strip()
+
+            # Detect variant from this order's product title
+            variant = _detect_variant_from_title(title) if title else "4x3"
+            items = [{"title": title[:150], "variant": variant}] if title else []
+
+            if detected_day and detected_day.lower() != ship_day.lower():
+                log.info("  SKIP %s (ship: %s != %s)", order_id, detected_day, ship_day)
+                continue
+
+            # If no day detected and no product info, skip
+            if not detected_day and not items:
+                continue
+
+            orders.append({
+                "order_id": order_id,
+                "order_id_4": order_id_4,
+                "ship_day": detected_day,
+                "items": items,
+                "ship_text": row_text[:200],
+            })
+
+        except Exception as e:
+            log.warning("Error processing order link %d: %s", li, e)
             continue
-            
-        # If no day detected but we have items, include it (will verify later)
-        if not detected_day and not items:
-            continue
-            
-        orders.append({
-            "order_id": order_id,
-            "order_id_4": order_id_4,
-            "ship_day": detected_day,
-            "items": items,
-            "ship_text": ship_text[:200],
-        })
     log.info("=" * 60)
     log.info("SCAN RESULTS: %d orders matched ship day '%s'", len(orders), ship_day)
     log.info("-" * 60)
@@ -936,9 +909,12 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
         
 def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
                      total_orders: int, downloaded: int, skipped: int, errors: int,
-                     elapsed: float):
+                     elapsed: float,dup_warnings: list = None):
     """Generate a summary report file in the base folder. Overwrites each time."""
     from datetime import datetime
+
+    if dup_warnings is None:
+        dup_warnings = []
 
     report_path = base_folder / "amazonDownload_report.txt"
 
@@ -1049,7 +1025,7 @@ def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
                 high_qty_orders.append(r)
                 break
 
-    if multi_variant_orders or high_qty_orders:
+    if multi_variant_orders or high_qty_orders or dup_warnings:
         lines.append("-" * 70)
         lines.append("  SPECIAL ATTENTION")
         lines.append("-" * 70)
@@ -1073,8 +1049,15 @@ def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
                     if qty > 1:
                         variant = item.get("variant", "4x3")
                         lines.append(f"    • {name}-{oid} ({variant}) -> Qty: {qty}")
+        if dup_warnings:
+            lines.append("")
+            lines.append("  ⚠ DUPLICATE LAST-4 ORDER IDs (verify manually):")
+            for oid4, oid_list in dup_warnings:
+                lines.append(f"    • Last-4 '{oid4}' shared by:")
+                for oid in oid_list:
+                    lines.append(f"        {oid}")
 
-    lines.append("")
+        lines.append("")
 
     lines.append("=" * 70)
     lines.append("  END OF REPORT")
@@ -1213,15 +1196,140 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
               detail=f"Found {len(orders)} orders for {ship_day}. Processing...", 
               done=False)
 
-        # --- Stage: Process each order ----------------------------------------
-        total_orders = len(orders)
+ 
+        new_orders = []
+        early_skipped = []
+        duplicate_id4 = {}  # track orders sharing same last-4 digits
+
+# Build a set of existing folder names for fast lookup
+        existing_folders = set()
+        if base_folder.exists():
+            for d in base_folder.iterdir():
+                if d.is_dir() and d.name != "WhatsApp":
+                    existing_folders.add(d.name.lower())
+        wa_dir = base_folder / "WhatsApp"
+        if wa_dir.exists():
+            for d in wa_dir.iterdir():
+                if d.is_dir():
+                    existing_folders.add(d.name.lower())
+
+# Group orders by last-4 digits to detect duplicates
+        for order in orders:
+            oid4 = order["order_id_4"]
+            duplicate_id4.setdefault(oid4, []).append(order)
+
+# Report duplicate last-4-digit orders
+        dup_warnings = []
+        for oid4, oid_list in duplicate_id4.items():
+            if len(oid_list) > 1:
+                dup_warnings.append((oid4, [o["order_id"] for o in oid_list]))
+                log.warning("  ⚠ DUPLICATE LAST-4 '%s': %s", oid4,
+                    [o["order_id"] for o in oid_list])
+
+# For each order, decide: skip or process
+        for order in orders:
+            oid4 = order["order_id_4"]
+
+    # Check if any existing folder contains -oid4
+            folder_match = False
+            for fname in existing_folders:
+                if f"-{oid4}" in fname:
+                    folder_match = True
+                    break
+
+            if not folder_match:
+        # No folder with this ID exists -> definitely new
+                new_orders.append(order)
+                continue
+
+    # A folder with this last-4 exists.
+    # If this last-4 is shared by multiple orders, we can't be sure
+    # which buyer it belongs to -> fetch buyer name to verify
+            if len(duplicate_id4.get(oid4, [])) > 1:
+                log.info("  DUP CHECK: %s (last-4 '%s' shared) - fetching buyer name...",
+                 order["order_id"], oid4)
+                try:
+            # Quick visit to get just the buyer name
+                    detail_url = f"{SELLER_CENTRAL_URL}/orders-v3/order/{order['order_id']}"
+                    page.goto(detail_url, wait_until="domcontentloaded", timeout=15000)
+                    time.sleep(1)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=6000)
+                    except Exception:
+                        pass
+
+            # Extract buyer name from "Ship to" section
+                    buyer_name = None
+                    ship_to = page.locator(
+                "div:has(> h2:has-text('Ship to')), "
+                "div:has(> h3:has-text('Ship to')), "
+                "div:has(> *:has-text('Ship to'))"
+            )
+                    if ship_to.count() > 0:
+                        lines = [l.strip() for l in ship_to.first.inner_text().split("\n") if l.strip()]
+                        for idx, line in enumerate(lines):
+                            if "ship to" in line.lower() and idx + 1 < len(lines):
+                                candidate = lines[idx + 1].strip()
+                                if candidate and not candidate.startswith("#") and \
+                                not re.match(r"^\d", candidate) and len(candidate) < 50:
+                                    buyer_name = candidate
+                                    break
+
+                    if buyer_name:
+                        safe_name = _sanitize_name(buyer_name)
+                        tag = f"{safe_name}-{oid4}"
+                # Check if this specific buyer-orderid combo exists
+                        exists = any(f.startswith(tag) for f in existing_folders)
+                        if exists:
+                            early_skipped.append(order)
+                            log.info("  EARLY SKIP: %s (%s-%s folder exists)",
+                                    order["order_id"], buyer_name, oid4)
+                        else:
+                            new_orders.append(order)
+                            log.info("  NEW ORDER: %s (%s-%s not in folder)",
+                             order["order_id"], buyer_name, oid4)
+                    else:
+                # Couldn't get name, process it to be safe
+                        new_orders.append(order)
+                        log.info("  PROCESS: %s (couldn't get buyer name, processing to be safe)",
+                         order["order_id"])
+                except Exception as e:
+                    log.warning("  DUP CHECK failed for %s: %s - will process", order["order_id"], e)
+                    new_orders.append(order)
+            else:
+        # Only one order has this last-4, and folder exists -> skip
+                early_skipped.append(order)
+                log.info("  EARLY SKIP: %s (folder with -%s exists)", order["order_id"], oid4)
+
+        skipped = len(early_skipped)
+        if early_skipped:
+            log.info("EARLY SKIPPED %d orders (already in folder). %d new to process.",
+             len(early_skipped), len(new_orders))
+            _emit(q, stage="process", pct=14,
+          detail=f"Skipped {len(early_skipped)} existing orders. Processing {len(new_orders)} new...",
+          done=False)
+
+# --- Stage: Process each NEW order -------------------------------------
+        total_orders = len(new_orders)
         processed = 0
-        skipped = 0
+    
         downloaded = 0
         errors = 0
         results: list[dict] = []
+
+
+        # Add early-skipped to results
+        for o in early_skipped:
+            results.append({
+        "order_id": o["order_id"],
+        "name": "?",
+        "variants": [it.get("variant", "?") for it in o.get("items", [])],
+        "status": "skipped",
+        "reason": "Already exists in folder",
+            })
+
         
-        for oi, order in enumerate(orders):
+        for oi, order in enumerate(new_orders):
             if _is_stopped(task_id):
                 _emit(q, stage="stopped", pct=0, detail="Stopped by user.", done=True)
                 return
@@ -1254,6 +1362,32 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                 
             buyer_name = details["name"]
             items = details["items"]
+            # If detail page items all default to 4x3 but the scan detected
+# a specific variant from the orders list page, use the scan's variant.
+# The scan reads the product title directly from the table row which is reliable.
+            scan_variant = None
+            scan_items = order.get("items", [])
+            if scan_items:
+                for si in scan_items:
+                    sv = si.get("variant", "4x3")
+                    if sv != "4x3":
+                        scan_variant = sv
+                        break
+
+            if scan_variant and items:
+    # Check if all detail items are 4x3 (likely failed to detect)
+                all_default = all(it.get("variant", "4x3") == "4x3" for it in items)
+                if all_default:
+                    log.info("  Using scan variant '%s' (detail page defaulted to 4x3)", scan_variant)
+                    for it in items:
+                        it["variant"] = scan_variant
+            # Also update title from scan if detail title is generic
+                        if scan_items[0].get("title"):
+                            it["title"] = scan_items[0]["title"]
+
+
+
+
             wa_info = details.get("whatsapp")
             variants_str = ", ".join(it.get("variant", "?") for it in items) or "?"
             wa_tag = " [WHATSAPP]" if wa_info else ""
@@ -1423,7 +1557,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
         try:
             _generate_report(
                 base_folder, results, ship_day, 
-                total_orders, downloaded, skipped, errors, elapsed
+                total_orders + len(early_skipped), downloaded, skipped, errors, elapsed,dup_warnings=dup_warnings
             )
         except Exception as re_err:
             log.warning("Failed to generate report: %s", re_err)
