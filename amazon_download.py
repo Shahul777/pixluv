@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import os
@@ -77,7 +78,30 @@ def _detect_variant_from_title(title: str) -> str:
             return key
 
     return "4x3"  # default
+REPORT_FILENAME = "amazonDownload_report.txt"
 
+def _parse_report_order_ids(base_folder: Path) -> set:
+    """Parse the existing amazonDownload_report.txt and extract all order IDs (full 3-digit+ IDs)
+    that have been previously processed/downloaded. Returns a set of full order IDs."""
+    report_path = base_folder / REPORT_FILENAME
+    if not report_path.exists():
+        return set()
+
+    processed_ids = set()
+    try:
+        content = report_path.read_text(encoding="utf-8")
+        # Look for lines in PROCESSED ORDERS section with format:
+        # "   1. order_id | name | variants | status"
+        # or lines containing order IDs (pattern: ###-#######-#######)
+        for line in content.split("\n"):
+            # Match full Amazon order IDs like "408-1234567-1234567"
+            matches = re.findall(r"\d{3}-\d{7}-\d{7}", line)
+            for m in matches:
+                processed_ids.add(m)
+    except Exception:
+        pass
+
+    return processed_ids
 def _sanitize_name(name: str) -> str:
     """Clean up buyer name for use in folder naming."""
     # Remove special characters, keep alphanumeric and spaces
@@ -916,101 +940,74 @@ def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
     if dup_warnings is None:
         dup_warnings = []
 
-    report_path = base_folder / "amazonDownload_report.txt"
 
-    # Scan base folder for all order folders (exclude WhatsApp subfolder itself)
-    regular_folders = []
-    for d in sorted(base_folder.iterdir()):
-        if d.is_dir() and d.name != "WhatsApp":
-            regular_folders.append(d.name)
+    report_path = base_folder / REPORT_FILENAME
 
-    # Scan WhatsApp folder
-    wa_folders = []
-    wa_dir = base_folder / "WhatsApp"
-    if wa_dir.exists():
-        for d in sorted(wa_dir.iterdir()):
-            if d.is_dir():
-                wa_folders.append(d.name)
+# Load previously processed order IDs from existing report
+    previously_processed = _parse_report_order_ids(base_folder)
 
-    # Build the report
+# Add newly processed orders (downloaded or errored - not skipped-from-report ones)
+    all_processed = set(previously_processed)
+    for r in results:
+        if r.get("status") != "skipped":
+            all_processed.add(r.get("order_id", ""))
+    all_processed.discard("")
+
     lines = []
     lines.append("=" * 70)
-    lines.append("          AMAZON ORDER DOWNLOAD REPORT")
+    lines.append("       AMAZON ORDER DOWNLOAD REPORT")
     lines.append("=" * 70)
-    lines.append(f"  Generated : {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
-    lines.append(f"  Ship Day  : {ship_day}")
-    lines.append(f"  Base Folder: {base_folder}")
-    lines.append(f"  Time Taken: {elapsed}s")
+    lines.append(f"  Last Updated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+    lines.append(f"  Ship Day    : {ship_day}")
+    lines.append(f"  Base Folder : {base_folder}")
     lines.append("")
     lines.append("-" * 70)
-    lines.append("  SUMMARY")
+    lines.append("  LAST RUN SUMMARY")
     lines.append("-" * 70)
-    lines.append(f"  Total orders processed this run : {total_orders}")
-    lines.append(f"  Downloaded (new)              : {downloaded}")
-    lines.append(f"  Skipped (already exists)      : {skipped}")
-    lines.append(f"  Errors                        : {errors}")
-    lines.append("")
-    lines.append(f"  Total order folders in base   : {len(regular_folders)}")
-    lines.append(f"  Total WhatsApp order folders  : {len(wa_folders)}")
-    lines.append(f"  Grand total all folders       : {len(regular_folders) + len(wa_folders)}")
+    lines.append(f"  Total orders this run        : {total_orders}")
+    lines.append(f"  Downloaded (new)             : {downloaded}")
+    lines.append(f"  Skipped (already in report)  : {skipped}")
+    lines.append(f"  Errors                       : {errors}")
+    lines.append(f"  Time Taken                   : {elapsed}s")
     lines.append("")
 
     # Regular orders list with detail
     lines.append("-" * 70)
-    lines.append(f"  ORDER FOLDERS ({len(regular_folders)})")
+    lines.append(f"  ALL PROCESSED ORDERS ({len(all_processed)})")
     lines.append("-" * 70)
-    for i, fname in enumerate(regular_folders, 1):
-        # Check if this order has detail from the results (multiple variants / qty > 1)
-        detail_note = _get_order_detail_note(fname, results)
-        # Check for 3x2/3x3 photo count in folder name (pattern: name-XXXX-(count)-3x2)
-        pc_match = re.search(r'\((\d+)\)-(3x[23])', fname)
-        if pc_match:
-            photo_note = f"{pc_match.group(2)}: {pc_match.group(1)} photos"
-            if detail_note:
-                detail_note = f"{photo_note}; {detail_note}"
-            else:
-                detail_note = photo_note
-                
-        if detail_note:
-            lines.append(f"  {i:3}. {fname}  <- {detail_note}")
-        else:
-            lines.append(f"  {i:3}. {fname}")
-            
-    if not regular_folders:
-        lines.append("   (none)")
+    for i, oid in enumerate(sorted(all_processed), 1):
+    # Find name and variant info from results
+        detail = ""
+        for r in results:
+            if r.get("order_id") == oid:
+                name = r.get("name", "")
+                variants = r.get("variants", [])
+                if name and name != "?":
+                    detail = f" | {name}"
+                    if variants:
+                        detail += f" | {', '.join(variants)}"
+                break
+        lines.append(f"  {i:3}. {oid}{detail}")
+    if not all_processed:
+        lines.append("  (none)")
     lines.append("")
 
-    # WhatsApp orders list
-    lines.append("-" * 70)
-    lines.append(f"  WHATSAPP ORDERS ({len(wa_folders)})")
-    lines.append("-" * 70)
-    for i, fname in enumerate(wa_folders, 1):
-        lines.append(f"  {i:3}. {fname}")
-    if not wa_folders:
-        lines.append("   (none)")
 
-    # WhatsApp quick-copy list: number followed by order_id
-    if wa_folders:
+    # -- This run's newly processed orders --
+    new_results = [r for r in results if r.get("status") != "skipped"]
+    if new_results:
+        lines.append("-" * 70)
+        lines.append(f"  THIS RUN - NEWLY PROCESSED ({len(new_results)})")
+        lines.append("-" * 70)
+        for i, r in enumerate(new_results, 1):
+            oid = r.get("order_id", "?")
+            name = r.get("name", "?")
+            variants = ", ".join(r.get("variants", []))
+            status = r.get("status", "?")
+            lines.append(f"  {i:3}. {oid} | {name} | {variants} | {status}")
         lines.append("")
-        lines.append("-" * 70)
-        lines.append("  WHATSAPP NUMBERS (number + order ID)")
-        lines.append("-" * 70)
-        for fname in wa_folders:
-            # Folder pattern: name-orderID4-whatsappNumber-component
-            parts = fname.split("-")
-            # Find 4-digit order ID and phone number (7-15 digits)
-            order_id_4 = ""
-            wa_number = ""
-            for p in parts:
-                if re.match(r"^\d{4}$", p) and not order_id_4:
-                    order_id_4 = p
-                elif re.match(r"^\d{7,15}$", p):
-                    wa_number = p
-            if wa_number and order_id_4:
-                lines.append(f"  {wa_number}")
-                lines.append(f"  {order_id_4}")
 
-    lines.append("")
+
 
     # Orders with multiple variants or quantity > 1
     multi_variant_orders = []
@@ -1058,14 +1055,28 @@ def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
                     lines.append(f"        {oid}")
 
         lines.append("")
+# WhatsApp orders (folder-based, still useful info)
+    wa_folders = []
+    wa_dir = base_folder / "WhatsApp"
+    if wa_dir.exists():
+        for d in sorted(wa_dir.iterdir()):
+            if d.is_dir():
+                wa_folders.append(d.name)
 
+    if wa_folders:
+        lines.append("-" * 70)
+        lines.append(f"  WHATSAPP ORDERS ({len(wa_folders)})")
+        lines.append("-" * 70)
+        for i, fname in enumerate(wa_folders, 1):
+            lines.append(f"  {i:3}. {fname}")
+        lines.append("")
     lines.append("=" * 70)
     lines.append("  END OF REPORT")
     lines.append("=" * 70)
 
     report_text = "\n".join(lines)
     report_path.write_text(report_text, encoding="utf-8")
-    log.info("Report written to %s", report_path)
+    log.info("Report written to %s (%d total processed orders)", report_path, len(all_processed))
 
 
 def _get_order_detail_note(folder_name: str, results: list[dict]) -> str:
@@ -1199,21 +1210,12 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
  
         new_orders = []
         early_skipped = []
-        duplicate_id4 = {}  # track orders sharing same last-4 digits
 
-# Build a set of existing folder names for fast lookup
-        existing_folders = set()
-        if base_folder.exists():
-            for d in base_folder.iterdir():
-                if d.is_dir() and d.name != "WhatsApp":
-                    existing_folders.add(d.name.lower())
-        wa_dir = base_folder / "WhatsApp"
-        if wa_dir.exists():
-            for d in wa_dir.iterdir():
-                if d.is_dir():
-                    existing_folders.add(d.name.lower())
-
-# Group orders by last-4 digits to detect duplicates
+        # Parse previously processed order IDs from the report
+        previously_processed = _parse_report_order_ids(base_folder)
+        log.info("Report contains %d previously processed order IDs", len(previously_processed))
+# Group orders by last-4 digits to detect duplicates (for report)
+        duplicate_id4 = {}
         for order in orders:
             oid4 = order["order_id_4"]
             duplicate_id4.setdefault(oid4, []).append(order)
@@ -1223,87 +1225,22 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
         for oid4, oid_list in duplicate_id4.items():
             if len(oid_list) > 1:
                 dup_warnings.append((oid4, [o["order_id"] for o in oid_list]))
-                log.warning("  ⚠ DUPLICATE LAST-4 '%s': %s", oid4,
+                log.warning(" ⚠ DUPLICATE LAST-4 '%s': %s", oid4,
                     [o["order_id"] for o in oid_list])
+ 
 
-# For each order, decide: skip or process
+# Group orders by last-4 digits to detect duplicates
         for order in orders:
-            oid4 = order["order_id_4"]
-
-    # Check if any existing folder contains -oid4
-            folder_match = False
-            for fname in existing_folders:
-                if f"-{oid4}" in fname:
-                    folder_match = True
-                    break
-
-            if not folder_match:
-        # No folder with this ID exists -> definitely new
-                new_orders.append(order)
-                continue
-
-    # A folder with this last-4 exists.
-    # If this last-4 is shared by multiple orders, we can't be sure
-    # which buyer it belongs to -> fetch buyer name to verify
-            if len(duplicate_id4.get(oid4, [])) > 1:
-                log.info("  DUP CHECK: %s (last-4 '%s' shared) - fetching buyer name...",
-                 order["order_id"], oid4)
-                try:
-            # Quick visit to get just the buyer name
-                    detail_url = f"{SELLER_CENTRAL_URL}/orders-v3/order/{order['order_id']}"
-                    page.goto(detail_url, wait_until="domcontentloaded", timeout=15000)
-                    time.sleep(1)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=6000)
-                    except Exception:
-                        pass
-
-            # Extract buyer name from "Ship to" section
-                    buyer_name = None
-                    ship_to = page.locator(
-                "div:has(> h2:has-text('Ship to')), "
-                "div:has(> h3:has-text('Ship to')), "
-                "div:has(> *:has-text('Ship to'))"
-            )
-                    if ship_to.count() > 0:
-                        lines = [l.strip() for l in ship_to.first.inner_text().split("\n") if l.strip()]
-                        for idx, line in enumerate(lines):
-                            if "ship to" in line.lower() and idx + 1 < len(lines):
-                                candidate = lines[idx + 1].strip()
-                                if candidate and not candidate.startswith("#") and \
-                                not re.match(r"^\d", candidate) and len(candidate) < 50:
-                                    buyer_name = candidate
-                                    break
-
-                    if buyer_name:
-                        safe_name = _sanitize_name(buyer_name)
-                        tag = f"{safe_name}-{oid4}"
-                # Check if this specific buyer-orderid combo exists
-                        exists = any(f.startswith(tag) for f in existing_folders)
-                        if exists:
-                            early_skipped.append(order)
-                            log.info("  EARLY SKIP: %s (%s-%s folder exists)",
-                                    order["order_id"], buyer_name, oid4)
-                        else:
-                            new_orders.append(order)
-                            log.info("  NEW ORDER: %s (%s-%s not in folder)",
-                             order["order_id"], buyer_name, oid4)
-                    else:
-                # Couldn't get name, process it to be safe
-                        new_orders.append(order)
-                        log.info("  PROCESS: %s (couldn't get buyer name, processing to be safe)",
-                         order["order_id"])
-                except Exception as e:
-                    log.warning("  DUP CHECK failed for %s: %s - will process", order["order_id"], e)
-                    new_orders.append(order)
-            else:
-        # Only one order has this last-4, and folder exists -> skip
+            full_order_id = order["order_id"]
+            if full_order_id in previously_processed:
                 early_skipped.append(order)
-                log.info("  EARLY SKIP: %s (folder with -%s exists)", order["order_id"], oid4)
+                log.info("  SKIP (in report): %s", full_order_id)
+            else:
+                new_orders.append(order)
 
         skipped = len(early_skipped)
         if early_skipped:
-            log.info("EARLY SKIPPED %d orders (already in folder). %d new to process.",
+            log.info("SKIPPED %d orders (already in report). %d new to process.",
              len(early_skipped), len(new_orders))
             _emit(q, stage="process", pct=14,
           detail=f"Skipped {len(early_skipped)} existing orders. Processing {len(new_orders)} new...",
@@ -1325,7 +1262,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
         "name": "?",
         "variants": [it.get("variant", "?") for it in o.get("items", [])],
         "status": "skipped",
-        "reason": "Already exists in folder",
+        "reason": "Already in report",
             })
 
         
@@ -1401,48 +1338,33 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                 inc_component = wa_info["included_component"]
                 
                 # Check if folder already exists (by name-orderID pattern)
-                if _folder_exists(base_folder, order_id_4, buyer_name, ""):
-                    log.info("Folder for %s-%s already exists, skipping WhatsApp order", 
-                             buyer_name, order_id_4)
-                    skipped += 1
-                    results.append({
-                        "order_id": order_id,
-                        "name": buyer_name,
-                        "variant": f"WhatsApp ({inc_component})",
-                        "status": "skipped",
-                        "reason": "Folder already exists",
-                    })
-                    _emit(q, stage="process", pct=pct, 
-                          detail=f"⏭️ WhatsApp order {buyer_name}-{order_id_4} already exists", 
-                          done=False,
-                          order={"order_id": order_id_4, "name": buyer_name, 
-                                 "variant": f"WA: {inc_component}", "status": "skipped"})
-                else:
-                    # Create WhatsApp folder inside base_folder
-                    wa_base = base_folder / "WhatsApp"
-                    wa_base.mkdir(parents=True, exist_ok=True)
-                    
-                    # Folder name: name-orderID4-whatsappNumber-includedComponent
-                    safe_name = re.sub(r'[<>:"/\\|?*]', '', buyer_name).strip()
-                    safe_component = re.sub(r'[<>:"/\\|?*]', '', inc_component).strip()
-                    wa_folder_name = f"{safe_name}-{order_id_4}-{wa_number}-{safe_component}"
-                    wa_folder = wa_base / wa_folder_name
-                    wa_folder.mkdir(parents=True, exist_ok=True)
-                    downloaded += 1
-                    
-                    log.info("Created WhatsApp folder: %s", wa_folder_name)
-                    results.append({
-                        "order_id": order_id,
-                        "name": buyer_name,
-                        "variant": f"WhatsApp ({inc_component})",
-                        "status": "whatsapp_created",
-                    })
-                    _emit(q, stage="process", pct=pct, 
-                          detail=f"📋 WhatsApp order: created folder {wa_folder_name}", 
-                          done=False,
-                          order={"order_id": order_id_4, "name": buyer_name, 
-                                 "variant": f"WA: {inc_component}", "status": "downloaded"})
-                
+                # Create WhatsApp folder inside base_folder
+                wa_base = base_folder / "WhatsApp"
+                wa_base.mkdir(parents=True, exist_ok=True)
+
+
+                # Folder name: name-orderID4-whatsappNumber-includedComponent
+                safe_name = re.sub(r'[<>:"/\\|?*]', '', buyer_name).strip()
+                safe_component = re.sub(r'[<>:"/\\|?*]', '', inc_component).strip()
+                wa_folder_name = f"{safe_name}-{order_id_4}-{wa_number}-{safe_component}"
+                wa_folder = wa_base / wa_folder_name
+                wa_folder.mkdir(parents=True, exist_ok=True)
+                downloaded += 1
+                log.info("Created WhatsApp folder: %s", wa_folder_name)
+                results.append({
+    "order_id": order_id,
+    "name": buyer_name,
+    "variant": f"WhatsApp ({inc_component})",
+    "status": "whatsapp_created",
+})
+                _emit(q, stage="process", pct=pct,
+      detail=f"📱 WhatsApp order: created folder {wa_folder_name}",
+      done=False,
+      order={"order_id": order_id_4, "name": buyer_name,
+             "variant": f"WA: {inc_component}", "status": "downloaded"})
+
+
+
                 # Skip zip download for WhatsApp orders
                 continue
                 
@@ -1482,12 +1404,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                         photo_count = pc_match.group(1)
                         
                 folder_name = _build_folder_name(buyer_name, order_id_4, variant, photo_count)
-                if _folder_exists(base_folder, order_id_4, buyer_name, variant):
-                    log.info("Folder already exists for %s %s, skipping", 
-                             order_id_4, variant)
-                    order_skipped += 1
-                    skipped += 1
-                    continue
+
                     
                 # Create the folder
                 target_folder = base_folder / folder_name
@@ -2022,60 +1939,31 @@ def _run_wa_sync(base_folder_path: str, group_name: str, task_id: str):
 
 
 def _wa_open_group(page, group_name: str) -> bool:
+    """Open the first chat in the chat list (assumed to be the target group)."""
     try:
-        search_box = page.locator(
-            "div[role='textbox'][title='Search input textbox'], "
-            "p.selectable-text[data-tab='3']"
+        # Simply click the first chat in the list - user keeps the target group on top
+        first_chat = page.locator(
+            "#pane-side div[role='listitem'], "
+            "#pane-side div[role='row'], "
+            "#pane-side div[data-testid='cell-frame-container']"
         )
-
-        if search_box.count() == 0:
-            search_bar = page.locator(
-                "div[data-tab='3'][role='textbox'], "
-                "div.lexical-rich-text-input[data-tab='3'], "
-                "div[title='Search or start a new chat']"
-            )
-            if search_bar.count() > 0:
-                search_bar.first.click()
-                time.sleep(1)
-            else:
-                side_header = page.locator("#side header, div[data-tab='3']")
-                if side_header.count() > 0:
-                    side_header.first.click()
-                    time.sleep(1)
-
-            search_box = page.locator(
-                "div[role='textbox'][title='Search input textbox'], "
-                "p.selectable-text[data-tab='3'], "
-                "div[contenteditable='true'][title='Search input textbox']"
-            )
-
-        if search_box.count() > 0:
-            search_box.first.click()
-            time.sleep(0.5)
-
-            page.keyboard.press("Control+a")
-            page.keyboard.press("Backspace")
-            time.sleep(0.3)
-
-            page.keyboard.type(group_name, delay=50)
+        if first_chat.count() > 0:
+            first_chat.first.click()
             time.sleep(2)
-
-        group_el = page.locator(f"span[title='{group_name}']")
-        if group_el.count() > 0:
-            group_el.first.click()
-            time.sleep(2)
+            log.info("Opened first chat in list (assumed group: %s)", group_name)
             return True
 
-        # Try partial match
-        group_el = page.locator(f"span:has-text('{group_name}')")
-        if group_el.count() > 0:
-            group_el.first.click()
+        # Fallback: try clicking first span with a title in the chat list
+        chat_title = page.locator("#pane-side span[title]")
+        if chat_title.count() > 0:
+            chat_title.first.click()
             time.sleep(2)
+            log.info("Opened first chat title in list")
             return True
-
+            
         return False
     except Exception as e:
-        log.error("Failed to open group '%s': %s", group_name, e)
+        log.error("Failed to open first chat: %s", e)
         return False
 def _wa_scan_messages(page, q: queue.Queue) -> dict:
     """Scan visible messages in the chat. Returns {order_id_4: [media_info_list]}."""
