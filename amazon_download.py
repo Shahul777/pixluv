@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 
+
 from flask import Blueprint, Response, jsonify, request
 
 from db import get_setting, set_setting, log_activity
@@ -51,16 +52,30 @@ DAY_ABBREVS = {
 # --- Variant detection --------------------------------------------------------
 # Matches "4 x 3", "4x3", "4 x 3", "3 x 2" etc. in product title
 _VARIANT_RE = re.compile(r"(\d)\s*[xX]\s*(\d)")
-
+_VARIANT_PRIORITY = ["4x6", "3x2", "3x3"]
 _KNOWN_VARIANTS = {"4x3", "4x6", "3x2", "3x3"}
 
 def _detect_variant_from_title(title: str) -> str:
-    """Detect product variant (size) from product title string."""
+
+    # Normalize: replace various separators to standard form for matching
+    normalized = re.sub(r'(\d)\s*[xX×]\s*(\d)', r'\1x\2', title)
+    normalized_lower = normalized.lower()
+
+    # Check non-default variants first (priority)
+    for v in _VARIANT_PRIORITY:
+        if v in normalized_lower:
+            return v
+
+    # Check for 4x3 (default)
+    if "4x3" in normalized_lower:
+        return "4x3"
+    # Fallback: regex scan
     matches = _VARIANT_RE.findall(title)
     for w, h in matches:
         key = f"{w}x{h}"
-        if key in _KNOWN_VARIANTS:
+        if key in _KNOWN_VARIANTS and key != "4x3":
             return key
+
     return "4x3"  # default
 
 def _sanitize_name(name: str) -> str:
@@ -93,27 +108,33 @@ def _folder_exists(base_folder: Path, order_id_4: str, name: str, variant: str) 
     """Check if a folder for this order already exists in base folder or WhatsApp subfolder.
     Matches on name-orderID_last4 pattern only (ignores variant suffix).
     """
-    safe_name = re.sub(r'[<>:"/\\|?*]', '', name).strip().lower()
-    pattern = f"{safe_name}-{order_id_4}"
+    # safe_name = re.sub(r'[<>:"/\\|?*]', '', name).strip().lower()
+    # pattern = f"{safe_name}-{order_id_4}"
 
-    # Check base folder
-    if base_folder.exists():
-        for d in base_folder.iterdir():
-            if not d.is_dir():
-                continue
-            if d.name.lower().startswith(pattern):
-                return True
-                
-    # Check WhatsApp subfolder
-    wa_folder = base_folder / "WhatsApp"
-    if wa_folder.exists():
-        for d in wa_folder.iterdir():
-            if not d.is_dir():
-                continue
-            if d.name.lower().startswith(pattern):
-                return True
-    
+    safe_name = _sanitize_name(name)
+    tag = f"{safe_name}-{order_id_4}"
+    def _scan(folder: Path) -> bool:
+        if not folder.exists():
+            return False
+        try:
+            for d in folder.iterdir():
+                if not d.is_dir():
+                    continue
+                low = d.name.lower()
+                # Matches: name-1234, name-1234-4x6, name-1234-(12)-3x2, etc.
+                if low.startswith(tag):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    if _scan(base_folder):
+        return True
+    if _scan(base_folder / "WhatsApp"):
+        return True
     return False
+
+  
 
 # --- Queue helpers ------------------------------------------------------------
 
@@ -230,8 +251,8 @@ def _is_logged_in(page) -> bool:
 def _wait_for_login(page, q: queue.Queue, timeout: int = 300) -> bool:
     """Navigate to Seller Central and wait for user to log in if needed."""
     try:
-        page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(2)
+        page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(1)
     except Exception as e:
         log.warning("Navigation timeout, checking state: %s", e)
 
@@ -269,14 +290,14 @@ def _navigate_to_unshipped(page, q: queue.Queue) -> bool:
     try:
         # Go to orders page if not already there
         if "orders-v3" not in page.url:
-            page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=30000)
-            time.sleep(4)
+            page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=20000)
+            time.sleep(2)
 
         # Wait for page to be usable
         try:
-            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_load_state("networkidle", timeout=8000)
         except Exception:
-            time.sleep(3)
+            time.sleep(1)
 
         # Click on "Unshipped" tab/link if available
         try:
@@ -289,12 +310,12 @@ def _navigate_to_unshipped(page, q: queue.Queue) -> bool:
             )
             if unshipped_tab.count() > 0:
                 unshipped_tab.first.click()
-                time.sleep(4)
+                time.sleep(2)
         except Exception:
             pass
 
         # Verify we can see orders (page loaded successfully)
-        time.sleep(2)
+        time.sleep(1)
 
         return True
     except Exception as e:
@@ -302,14 +323,33 @@ def _navigate_to_unshipped(page, q: queue.Queue) -> bool:
         return False
 
 def _extract_ship_day(ship_text: str) -> str | None:
-    """Extract day of week abbreviation from ship-by text.
-    E.g. 'Ship by date: Wed, 1 Jul, 2026 IST' -> 'Wed'
-    """
+    # Strategy 1: Look for "Ship by" followed by a day abbreviation
+    m = re.search(
+    r'Ship\s*by[^:]*:\s*(Mon|Tue|Wed|Thu|Fri|Sat|Sun)',
+    ship_text, re.IGNORECASE
+            )
+    if m:
+        raw = m.group(1).strip().capitalize()
+        for abbrev in DAY_ABBREVS:
+            if raw.startswith(abbrev):
+                return abbrev
+
+# Strategy 2: Parse date like "1 Jul 2026" or "1 Jul, 2026" and get weekday
+    date_m = re.search(r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[,.]?\s*(\d{4})', ship_text, re.IGNORECASE)
+    if date_m:
+        try:
+            from datetime import datetime
+            date_str = f"{date_m.group(1)} {date_m.group(2)[:3]} {date_m.group(3)}"
+            dt = datetime.strptime(date_str, "%d %b %Y")
+            day_name = dt.strftime("%a") # Mon, Tue, Wed, ...
+            return day_name
+        except Exception:
+            pass
+
+    # Strategy 3: Direct day abbreviation search (fallback)
     for abbrev in DAY_ABBREVS:
-        # Check for day abbreviation in the text
-        if re.search(rf"\b{abbrev}\b", ship_text, re.IGNORECASE):
+        if re.search(rf'\b{abbrev}\b', ship_text, re.IGNORECASE):
             return abbrev
-        # Check full day name
         for variant in DAY_ABBREVS[abbrev]:
             if variant.lower() in ship_text.lower():
                 return abbrev
@@ -328,16 +368,16 @@ def _scrape_order_list(page, ship_day: str, q: queue.Queue) -> list[dict]:
     try:
         page.wait_for_selector(
             "table, .orders-table, [data-test-id='order-list'], .myo-table",
-            timeout=15000
+            timeout=10000
         )
     except Exception:
         # Try alternative: wait for any order link
         try:
-            page.wait_for_selector("a[href*='orders-v3/order/']", timeout=10000)
+            page.wait_for_selector("a[href*='orders-v3/order/']", timeout=8000)
         except Exception:
             pass
             
-    time.sleep(2)
+    time.sleep(1)
     
     # Strategy: Find all order rows by looking for order ID links
     # Amazon order IDs are in format: XXX-XXXXXXX-XXXXXXX
@@ -442,6 +482,14 @@ def _scrape_order_list(page, ship_day: str, q: queue.Queue) -> list[dict]:
             "items": items,
             "ship_text": ship_text[:200],
         })
+    log.info("=" * 60)
+    log.info("SCAN RESULTS: %d orders matched ship day '%s'", len(orders), ship_day)
+    log.info("-" * 60)
+    for i, o in enumerate(orders, 1):
+        variants = ", ".join(it.get("variant", "?") for it in o.get("items", [])) or "?"
+        log.info("  %d. %s  (ship: %s, variant: %s)",
+             i, o["order_id"], o.get("ship_day", "?"), variants)
+    log.info("=" * 60)
         
     _emit(q, stage="scan", pct=10, 
           detail=f"Found {len(orders)} orders matching ship day '{ship_day}'", 
@@ -459,11 +507,15 @@ def _get_order_details(page, order_id: str, q: queue.Queue) -> dict | None:
     detail_url = f"{SELLER_CENTRAL_URL}/orders-v3/order/{order_id}"
     
     try:
-        page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(3)
-        page.wait_for_load_state("networkidle", timeout=15000)
+        page.goto(detail_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(1)
+        try:
+
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            time.sleep(1)
     except Exception:
-        time.sleep(3)
+        time.sleep(2)
         
     time.sleep(2)
     
@@ -700,10 +752,11 @@ def _get_order_details(page, order_id: str, q: queue.Queue) -> dict | None:
         for i in range(show_more_btns.count()):
             try:
                 show_more_btns.nth(i).click()
-                time.sleep(1)
+                time.sleep(0.3)
             except Exception:
                 continue
-        time.sleep(2)
+        if show_more_btns.count() > 0:
+            time.sleep(1)  
     except Exception:
         pass
 
@@ -792,13 +845,17 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
     )
     
     try:
-        page.goto(cust_url, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(3)
-        page.wait_for_load_state("networkidle", timeout=15000)
+        page.goto(cust_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(1)
+        try:
+
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            time.sleep(1)
     except Exception:
-        time.sleep(3)
+        time.sleep(2)
         
-    time.sleep(2)
+   
     
     # Find and click the "Download zip file" button
     try:
@@ -824,17 +881,28 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
         dest_folder.mkdir(parents=True, exist_ok=True)
         
         # Set up download handling
-        with page.expect_download(timeout=60000) as download_info:
+
+        def _save_download(dl, folder, oid, oiid):
+            try:
+                filename = dl.suggested_filename or f"{oid}_{oiid}.zip"
+                dl.save_as(str(folder / filename))
+                log.info("Download saved: %s -> %s", filename, folder)
+            except Exception as ex:
+                log.error("Background save failed for %s: %s", oid, ex)
+
+
+        with page.expect_download(timeout=30000) as download_info:
             download_btn.first.click()
             
         download = download_info.value
-        
-        # Save the downloaded file to the destination folder
-        filename = download.suggested_filename or f"{order_id}_{order_item_id}.zip"
-        dest_path = dest_folder / filename
-        download.save_as(str(dest_path))
-        
-        log.info("Downloaded %s to %s", filename, dest_folder)
+        save_thread = threading.Thread(
+        target=_save_download,
+        args=(download, dest_folder, order_id, order_item_id),
+        daemon=True
+    )
+        save_thread.start()
+
+        log.info("Download triggered for order %s, saving in background", order_id)
         return True
         
     except Exception as e:
@@ -847,12 +915,19 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
             zip_links = page.locator("a[href*='.zip'], a[href*='download']")
             if zip_links.count() > 0:
                 dest_folder.mkdir(parents=True, exist_ok=True)
-                with page.expect_download(timeout=60000) as download_info:
+                with page.expect_download(timeout=30000) as download_info:
                     zip_links.first.click()
                 download = download_info.value
-                filename = download.suggested_filename or f"{order_id}_{order_item_id}.zip"
-                download.save_as(str(dest_folder / filename))
-                log.info("Fallback download succeeded: %s", filename)
+
+
+                save_thread = threading.Thread(
+                target=_save_download,
+                args=(download, dest_folder, order_id, order_item_id),
+                daemon=True
+            )
+                save_thread.start()
+                log.info("Fallback download triggered: %s", order_id)
+            
                 return True
         except Exception as e2:
             log.error("Fallback download also failed: %s", e2)
@@ -1153,6 +1228,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
 
             order_id = order["order_id"]
             order_id_4 = order["order_id_4"]
+            order_t0 = time.perf_counter()
             pct = 12 + int((oi / total_orders) * 80)
 
             _emit(q, stage="process", pct=pct, 
@@ -1162,7 +1238,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
 
             # Navigate to order detail to get name and items
             details = _get_order_details(page, order_id, q)
-            
+           
             if not details or not details.get("name"):
                 log.warning("Could not get details for order %s", order_id)
                 _emit(q, stage="process", pct=pct, 
@@ -1178,7 +1254,12 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                 
             buyer_name = details["name"]
             items = details["items"]
-            
+            wa_info = details.get("whatsapp")
+            variants_str = ", ".join(it.get("variant", "?") for it in items) or "?"
+            wa_tag = " [WHATSAPP]" if wa_info else ""
+            log.info("ORDER %d/%d: %s  (%s, %s, %s)%s",
+                        oi + 1, total_orders, order_id, buyer_name, variants_str,
+                            order.get("ship_day", "?"), wa_tag)
             # --- Handle WhatsApp orders ---
             wa_info = details.get("whatsapp")
             if wa_info:
@@ -1299,7 +1380,7 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                         target_folder.rmdir()
                         
                 # Small delay between downloads
-                time.sleep(1)
+         
                 
             processed += 1
             status = "done" if order_downloaded > 0 else (
@@ -1319,6 +1400,11 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                   detail=f"✔️ {buyer_name}-{order_id_4}: "
                          f"{order_downloaded} downloaded, {order_skipped} skipped",
                   done=False)
+            
+            order_elapsed = round(time.perf_counter() - order_t0, 1)
+            log.info("DONE %d/%d: %s  (%s, %s) -> %s  [%.1fs]",
+                        oi + 1, total_orders, order_id, buyer_name, variants_str,
+                        status, order_elapsed)
                   
         # --- Stage: Done ------------------------------------------------------
         elapsed = round(time.perf_counter() - t0, 1)
