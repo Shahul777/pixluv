@@ -825,7 +825,7 @@ def _get_order_details(page, order_id: str, q: queue.Queue) -> dict | None:
         "whatsapp": whatsapp_info,
     }
 def _download_zip_for_item(page, order_id: str, order_item_id: str,
-                           dest_folder: Path, q: queue.Queue) -> bool:
+                           dest_folder: Path, q: queue.Queue, wait: bool = False) -> bool:
     """Navigate to the Customisation Information page and download the zip.
     
     Returns True on success.
@@ -892,14 +892,18 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
             download_btn.first.click()
             
         download = download_info.value
-        save_thread = threading.Thread(
-        target=_save_download,
-        args=(download, dest_folder, order_id, order_item_id),
-        daemon=True
-    )
-        save_thread.start()
 
-        log.info("Download triggered for order %s, saving in background", order_id)
+        if wait:
+            _save_download(download, dest_folder, order_id, order_item_id)
+            log.info("Download completed (sync) for order %s", order_id)
+        else:
+            save_thread = threading.Thread(
+            target=_save_download,
+                 args=(download, dest_folder, order_id, order_item_id),
+                  daemon=True
+    )
+            save_thread.start()
+            log.info("Download triggered for order %s, saving in background", order_id)
         return True
         
     except Exception as e:
@@ -917,13 +921,22 @@ def _download_zip_for_item(page, order_id: str, order_item_id: str,
                 download = download_info.value
 
 
-                save_thread = threading.Thread(
-                target=_save_download,
-                args=(download, dest_folder, order_id, order_item_id),
-                daemon=True
-            )
-                save_thread.start()
-                log.info("Fallback download triggered: %s", order_id)
+
+                if wait:
+                    _save_download(download, dest_folder, order_id, order_item_id)
+                    log.info("Fallback download completed (sync): %s", order_id)
+                else:
+                    save_thread = threading.Thread(
+                        target=_save_download,
+                        args=(download, dest_folder, order_id, order_item_id),
+                     daemon=True
+        )
+                    save_thread.start()
+                    log.info("Fallback download triggered: %s", order_id)
+
+        
+
+
             
                 return True
         except Exception as e2:
@@ -1415,8 +1428,11 @@ def _run_download(base_folder_path: str, ship_day: str, task_id: str):
                       done=False)
                       
                 # Download the zip
+
+                is_last_order = (oi == total_orders - 1)
                 success = _download_zip_for_item(
-                    page, order_id, order_item_id, target_folder, q
+                    page, order_id, order_item_id, target_folder, q,
+                    wait=is_last_order
                 )
                 
                 if success:
