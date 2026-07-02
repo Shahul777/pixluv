@@ -2,375 +2,3201 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Basa - Print PDF Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Basa Post-Print Workflow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
-            background: #f0f2f5;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 40%, #24243e 100%);
             min-height: 100vh;
+            color: #e0e0e0;
         }
-        .header {
-            background: #1a1a2e;
-            color: #fff;
-            text-align: center;
-            padding: 18px 16px;
+        .navbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 32px;
+            background: rgba(255,255,255,0.04);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            flex-wrap: wrap; gap: 12px;
         }
-        .header h1 {
-            font-size: 22px;
-            font-weight: 600;
-            letter-spacing: 1px;
+        .brand {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: 3px;
+            background: linear-gradient(135deg, #a78bfa, #7c3aed);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .header p {
-            font-size: 12px;
-            color: #aaa;
-            margin-top: 4px;
-        }
-        .container {
-            max-width: 520px;
-            margin: 24px auto;
-            padding: 0 16px;
-        }
-        .card {
-            background: #fff;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        .nav-subtitle { font-size: .82rem; color: #8888aa; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px 24px 40px; }
+        .alert {
+            padding: 14px 20px;
+            border-radius: 10px;
             margin-bottom: 16px;
+            font-size: .88rem;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn .3s ease;
         }
-        .step-label {
-            font-size: 12px;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-            font-weight: 600;
+        .alert.visible { display: flex; }
+        @keyframes slideIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+        .alert-success { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+        .alert-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+        .alert-info   { background: rgba(96,165,250,0.12); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
+        .alert-close {
+            margin-left: auto; background: none; border: none; color: inherit;
+            font-size: 1.1rem; cursor: pointer; opacity: .6;
         }
-        label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: #333;
-            margin-bottom: 6px;
+        .alert-close:hover { opacity: 1; }
+        .module-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 16px;
+            padding: 28px 28px 24px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            transition: border-color .3s, box-shadow .3s;
         }
-        select, input[type="text"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 15px;
-            background: #fafafa;
-            transition: border-color 0.2s;
-            -webkit-appearance: none;
+        .module-card:hover { border-color: rgba(124,58,237,0.25); box-shadow: 0 4px 30px rgba(124,58,237,0.08); }
+
+        .module-header { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+        .step-circle {
+            width: 38px; height: 38px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: .95rem; color: #fff; flex-shrink: 0;
+            background: linear-gradient(135deg, #7c3aed, #a78bfa);
         }
-        select:focus, input[type="text"]:focus {
+        .step-circle.done { background: linear-gradient(135deg, #059669, #34d399); }
+        .module-title { font-size: 1.15rem; font-weight: 700; color: #f0f0f0; }
+        .status-pill {
+            display: inline-block; padding: 2px 10px; border-radius: 20px;
+            font-size: .68rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .5px; margin-left: 8px; vertical-align: middle;
+        }
+        .pill-done    { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .pill-pending { background: rgba(234,179,8,0.15); color: #fbbf24; }
+        .pill-running { background: rgba(96,165,250,0.15); color: #60a5fa; }
+
+        .module-desc { font-size: .83rem; color: #8888aa; margin: 8px 0 20px 52px; line-height: 1.55; }
+        .form-row { display: flex; gap: 12px; align-items: flex-end; }
+        .form-group { flex: 1; }
+        .form-group label {
+                        display: block; font-size: .78rem; font-weight: 600;
+            color: #aaa; margin-bottom: 6px; text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+        .form-input {
+            width: 100%; padding: 10px 14px; border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.06);
+            color: #e8e8e8; font-size: .9rem;
+            transition: border-color .2s, box-shadow .2s;
             outline: none;
-            border-color: #1a1a2e;
         }
-        .info-text {
-            font-size: 13px;
-            color: #666;
-            margin-top: 6px;
-            font-style: italic;
-        }
-        .upload-area {
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 32px 16px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: #fafafa;
-            position: relative;
-        }
-        .upload-area:hover, .upload-area.dragover {
-                       border-color: #1a1a2e;
-            background: #f0f0ff;
-        }
-        .upload-area input[type="file"] {
-            position: absolute;
-            inset: 0;
-            opacity: 0;
-            cursor: pointer;
-        }
-        .upload-icon {
-            font-size: 40px;
-            margin-bottom: 8px;
-        }
-        .upload-text {
-            font-size: 14px;
-            color: #555;
-        }
-        .upload-text strong {
-            color: #1a1a2e;
-        }
-        .file-count {
-            margin-top: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            color: #1a1a2e;
-        }
-        .file-count.error {
-            color: #d32f2f;
-        }
+        .form-input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.2); }
+        .form-input:disabled { opacity: .4; cursor: not-allowed; }
+        .form-input::placeholder { color: #555; }
+select.form-input { -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23aaa' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
         .btn {
-            display: block;
-            width: 100%;
-            padding: 14px;
-            background: #1a1a2e;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
+            padding: 10px 28px; border-radius: 10px; border: none;
+            font-size: .88rem; font-weight: 600; cursor: pointer;
+            transition: all .2s; white-space: nowrap; text-decoration: none;
+            display: inline-flex; align-items: center; gap: 6px;
         }
-        .btn:hover { background: #2a2a4e; }
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            color: #fff; box-shadow: 0 4px 14px rgba(124,58,237,0.3);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,58,237,0.4); }
+        .btn-success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: #fff; box-shadow: 0 4px 14px rgba(16,185,129,0.3);
+        }
+        .btn-success:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
         .btn:disabled {
-            background: #999;
-            cursor: not-allowed;
+            background: rgba(255,255,255,0.06); color: #555; cursor: not-allowed;
+            box-shadow: none; transform: none;
         }
-        .progress-wrap {
-            display: none;
-            margin-top: 16px;
+        .progress-section { display: none; margin-top: 22px; }
+        .progress-section.visible { display: block; }
+
+        .progress-bar-wrap {
+            width: 100%; height: 28px; border-radius: 14px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            overflow: hidden; position: relative;
         }
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background: #1a1a2e;
+        .progress-bar-fill {
+            height: 100%; border-radius: 14px;
+            background: linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed);
+            background-size: 200% 100%;
+            animation: shimmer 2s linear infinite;
+            transition: width .4s ease;
             width: 0%;
-            transition: width 0.3s;
-            border-radius: 3px;
         }
-        .status-text {
-            font-size: 13px;
-            color: #666;
-            text-align: center;
-            margin-top: 8px;
+        .progress-bar-fill.done {
+            background: linear-gradient(90deg, #059669, #34d399);
+            animation: none;
         }
-        .error-msg {
-            background: #ffeaea;
-            color: #d32f2f;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-top: 12px;
-            display: none;
+        .progress-bar-fill.error {
+            background: linear-gradient(90deg, #dc2626, #f87171);
+            animation: none;
         }
-        .success-msg {
-            background: #e8f5e9;
-            color: #2e7d32;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-top: 12px;
-                        display: none;
-            text-align: center;
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        .progress-pct {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: .78rem; font-weight: 700; color: #fff;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+
+        .progress-meta {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 10px; font-size: .8rem; color: #999;
+        }
+        .progress-stage {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .stage-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #7c3aed; animation: pulse 1s ease infinite;
+        }
+        .stage-dot.done { background: #34d399; animation: none; }
+        .stage-dot.error { background: #f87171; animation: none; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .progress-detail {
+            margin-top: 8px; font-size: .78rem; color: #777;
+            min-height: 1.2em;
+        }
+        .stage-timeline {
+            display: flex; gap: 6px; margin-top: 16px; flex-wrap: wrap;
+        }
+                .stage-chip {
+            padding: 4px 12px; border-radius: 20px; font-size: .7rem;
+            font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+            background: rgba(255,255,255,0.05); color: #666;
+            border: 1px solid rgba(255,255,255,0.06);
+            transition: all .3s;
+        }
+        .stage-chip.active {
+            background: rgba(124,58,237,0.15); color: #a78bfa;
+            border-color: rgba(124,58,237,0.3);
+        }
+        .stage-chip.completed {
+            background: rgba(34,197,94,0.12); color: #4ade80;
+            border-color: rgba(34,197,94,0.25);
+        }
+        .stage-chip.errored {
+            background: rgba(239,68,68,0.12); color: #f87171;
+            border-color: rgba(239,68,68,0.25);
+        }
+
+        .table-section { display: none; margin-top: 22px; }
+        .table-section.visible { display: block; }
+        .table-wrap {
+            margin-top: 10px; margin-left: 0;
+            max-height: 350px; overflow-y: auto;
+            border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
+        }
+        .table-wrap::-webkit-scrollbar { width: 6px; }
+        .table-wrap::-webkit-scrollbar-track { background: transparent; }
+        .table-wrap::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 3px; }
+
+        table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        thead th {
+            position: sticky; top: 0;
+            background: rgba(124,58,237,0.15); backdrop-filter: blur(8px);
+            padding: 10px 14px; text-align: left; font-weight: 600;
+            color: #c4b5fd; font-size: .75rem; text-transform: uppercase;
+            letter-spacing: .5px; border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        tbody td {
+            padding: 9px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+            color: #ccc;
+        }
+        tbody tr:hover { background: rgba(124,58,237,0.06); }
+
+        .tag {
+            display: inline-block; padding: 2px 8px; border-radius: 6px;
+            font-size: .72rem; font-weight: 600;
+        }
+        .tag-id { background: rgba(96,165,250,0.15); color: #60a5fa; }
+        .tag-variant { background: rgba(168,85,247,0.15); color: #c084fc; }
+        .code-name { font-family: 'Cascadia Code', 'Fira Code', monospace; color: #a78bfa; font-size: .8rem; }
+
+        .table-title {
+            font-size: .88rem; font-weight: 600; color: #d4d4d4;
+            margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+        }
+        .count-badge {
+            background: rgba(124,58,237,0.2); color: #a78bfa; padding: 2px 10px;
+            border-radius: 20px; font-size: .72rem; font-weight: 700;
+        }
+
+        .summary-card {
+            display: none; margin-top: 18px; padding: 18px 22px;
+            border-radius: 12px;
+            background: rgba(34,197,94,0.06);
+            border: 1px solid rgba(34,197,94,0.2);
+        }
+        .summary-card.visible { display: block; }
+        .summary-card h4 { font-size: .9rem; color: #4ade80; margin-bottom: 10px; }
+        .summary-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;
+        }
+        .summary-item { font-size: .82rem; color: #bbb; }
+        .summary-item span { color: #e0e0e0; font-weight: 600; }
+
+        .btn-outline {
+            background: rgba(255,255,255,0.06);
+            color: #a78bfa;
+            border: 1px solid rgba(124,58,237,0.3);
+        }
+        .btn-outline:hover { background: rgba(124,58,237,0.15); }
+        .btn-outline:disabled { opacity: .3; cursor: not-allowed; background: rgba(255,255,255,0.03); }
+
+        .preview-container {
+            max-height: 70vh; overflow-y: auto; border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.25); padding: 16px;
+            display: flex; flex-direction: column; align-items: center; gap: 14px;
+        }
+        .preview-container::-webkit-scrollbar { width: 6px; }
+        .preview-container::-webkit-scrollbar-track { background: transparent; }
+        
+                .preview-container::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.3); border-radius: 3px; }
+        .preview-container img {
+            max-width: 100%; border-radius: 6px;
+            box-shadow: 0 2px 14px rgba(0,0,0,0.5);
+        }
+        .pdf-nav {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px; gap: 12px;
+        }
+        .pdf-nav-label {
+            font-size: .84rem; font-weight: 600; color: #c4b5fd;
+            text-align: center; flex: 1; line-height: 1.4;
+        }
+        .pdf-nav-label small { display: block; font-size: .72rem; color: #888; font-weight: 400; }
+         .match-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+        .match-item {
+            display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+            border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+            background: rgba(255,255,255,0.03); cursor: pointer;
+            transition: all .2s;
+        }
+        .match-item:hover { border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.06); }
+        .match-item.active { border-color: rgba(124,58,237,0.5); background: rgba(124,58,237,0.1); }
+        .match-filename { flex: 1; font-size: .84rem; color: #ccc; font-weight: 500; }
+        .match-filename small { display: block; font-size: .72rem; color: #777; font-weight: 400; }
+        .similarity-badge {
+            padding: 4px 12px; border-radius: 20px; font-size: .72rem; font-weight: 700;
+            min-width: 56px; text-align: center;
+        }
+
+        .sim-high { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .sim-medium { background: rgba(234,179,8,0.15); color: #fbbf24; }
+        .sim-low { background: rgba(239,68,68,0.12); color: #f87171; }
+        .m4-spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid rgba(167,139,250,0.3); border-top-color: #a78bfa;
+            border-radius: 50%; animation: m4spin .6s linear infinite;
+        }
+        @keyframes m4spin { to { transform: rotate(360deg); } }
+        
+        .tab-bar {
+    display: flex; gap: 4px; padding: 0; margin: 0;
+    list-style: none; flex-wrap: wrap;
+}
+.tab-btn {
+    padding: 8px 18px; border-radius: 8px 8px 0 0; border: none;
+    background: rgba(255,255,255,0.04); color: #888;
+    font-size: .82rem; font-weight: 600; cursor: pointer;
+    transition: all .2s; border-bottom: 2px solid transparent;
+}
+.tab-btn:hover { background: rgba(255,255,255,0.08); color: #ccc; }
+.tab-btn.active {
+    background: rgba(124,58,237,0.15); color: #a78bfa;
+    border-bottom: 2px solid #7c3aed;
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+        
+        .footer { text-align: center; font-size: .75rem; color: #555; padding: 20px 0; }
+        @media (max-width: 640px) {
+            .navbar { padding: 12px 16px; }
+            .container { padding: 16px 12px 40px; }
+            .module-card { padding: 20px 16px; }
+            .form-row { flex-direction: column; }
+            .module-desc { margin-left: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>BASA &bull; Pre-Print Workflow</h1>
-        <p>Upload photos &rarr; Get print-ready CMYK PDF</p>
+
+<nav class="navbar">
+    <div style="display:flex;align-items:center;gap:16px;">
+        <span class="brand">BASA</span>
+        <span class="nav-subtitle">Post-Print Workflow</span>
     </div>
 
-    <div class="container">
-        <form id="pdfForm" enctype="multipart/form-data">
+    <div class="tab-bar" id="tabBar">
+    <button class="tab-btn active" data-tab="tab-m5">&#127912; Polaroid Placement</button>
+    <button class="tab-btn" data-tab="tab-m1">&#128196; PDF Combine</button>
+    <button class="tab-btn" data-tab="tab-m6">&#127991; Final Label</button>
+    <button class="tab-btn" data-tab="tab-m2">&#128230; Shipping Labels</button>
+    <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
+    <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button>
+</div>
+</nav>
 
-            <div class="card">
-                <div class="step-label">Step 1 &mdash; Choose Layout</div>
-                <label for="layout">Layout</label>
-                <select id="layout" name="layout">
-                    {% for key, val in layouts.items() %}
-                    <option value="{{ key }}" data-max="{{ val.max_images }}">{{ val.label }}</option>
-                    {% endfor %}
+<div class="container">
+
+    <div id="m1Alert" class="alert">
+        <span id="m1AlertText"></span>
+        <button class="alert-close" onclick="this.parentElement.classList.remove('visible')">&times;</button>
+    </div>
+<div class="tab-panel" id="tab-m1">
+    <div class="module-card" id="m1Card">
+        <div class="module-header">
+            <div class="step-circle" id="m1Circle">1</div>
+            <span class="module-title">
+                Print PDF Sorting &amp; Packaging
+                <span class="status-pill pill-pending" id="m1Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Select an <strong>output folder</strong> containing print PDFs. Files with "combined" in the name are
+            <strong>deleted first</strong>. Remaining PDFs are sorted by
+            <strong>Variant &rarr; Complexity &rarr; Name</strong>, renamed with a numeric prefix,
+            combined into a single lossless PDF.
+        </p>
+
+        <div class="form-row" style="margin-bottom:14px;">
+            <div class="form-group">
+                <label for="m1Base">Base Folder</label>
+                <input type="text" class="form-input" id="m1Base" placeholder="C:\Users\you\Desktop\Orders">
+            </div>
+            <div>
+                <button id="m1SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="m1OutputFolder">Output Folder</label>
+                <select class="form-input" id="m1OutputFolder" disabled>
+                    <option value="">— save base folder first —</option>
                 </select>
-                <div class="info-text" id="maxInfo">Max 18 photos for this layout</div>
+            </div>
+            <div>
+                <button id="m1Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
+            </div>
+            <div>
+                <button id="m1RunBtn" class="btn btn-success" disabled>&#9654; Run</button>
+            </div>
+        </div>
+        <div class="progress-section" id="m1Progress">
+            <div class="stage-timeline" id="m1Stages">
+                <span class="stage-chip" data-stage="cleanup">Cleanup</span>
+                <span class="stage-chip" data-stage="scan">Scan</span>
+                <span class="stage-chip" data-stage="sort">Sort</span>
+                <span class="stage-chip" data-stage="rename">Rename</span>
+                <span class="stage-chip" data-stage="index">Index</span>
+                <span class="stage-chip" data-stage="labels">Labels</span>
+                <span class="stage-chip" data-stage="combine">Combine</span>
+                <span class="stage-chip" data-stage="zip">Zip</span>
+                <span class="stage-chip" data-stage="report">Report</span>
+                <span class="stage-chip" data-stage="done">Done</span>
             </div>
 
-            <div class="card">
-                <div class="step-label">Step 2 &mdash; Order Name</div>
-                <label for="orderName">Order / Folder Name</label>
-                <input type="text" id="orderName" name="order_name" placeholder="e.g. ORD-20260422">
-            </div>
-
-            <div class="card">
-                <div class="step-label">Step 3 &mdash; Upload Photos</div>
-                <div class="upload-area" id="uploadArea">
-                    <input type="file" name="images" id="imageInput" multiple
-                        accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.heic,.heif">
-                    <div class="upload-icon">📷</div>
-                    <div class="upload-text">
-                        <strong>Tap to select photos</strong><br>
-                        or drag &amp; drop here
-                    </div>
+            <div style="margin-top:14px;">
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar-fill" id="m1Bar"></div>
+                    <div class="progress-pct" id="m1Pct">0%</div>
                 </div>
-                <div class="file-count" id="fileCount"></div>
             </div>
 
-            <button type="submit" class="btn" id="submitBtn">Generate CMYK Print PDF</button>
-
-            <div class="progress-wrap" id="progressWrap">
-                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-                <div class="status-text" id="statusText">Processing...</div>
+            <div class="progress-meta">
+                            <div class="progress-stage">
+                <div class="stage-dot" id="m1Dot"></div>
+                <span id="m1StageLabel">Starting...</span>
             </div>
+            <span id="m1Eta"></span>
+        </div>
 
-            <div class="error-msg" id="errorMsg"></div>
-            <div class="success-msg" id="successMsg"></div>
+        <div class="progress-detail" id="m1Detail"></div>
+        </div>
+
+      <div class="summary-card" id="m1Summary">
+    <h4>&#10003; Completed</h4>
+    <div class="summary-grid">
+        <div class="summary-item">Orders: <span id="sumIds">-</span></div>
+        <div class="summary-item">Total Boards: <span id="sumTotal">-</span></div>
+        <div class="summary-item">4x3 Boards: <span id="sumBoards4x3">-</span></div>
+        <div class="summary-item">3x2 Boards: <span id="sumBoards3x2">-</span></div>
+        <div class="summary-item">3x3 Boards: <span id="sumBoards3x3">-</span></div>
+        <div class="summary-item">4x6 Boards: <span id="sumBoards4x6">-</span></div>
+        <div class="summary-item">Time: <span id="sumTime">-</span></div>
+        <div class="summary-item">Combined PDF: <span id="sumPdf">-</span></div>
+    </div>
+</div>
+
+        <div class="table-section" id="m1Table">
+            <div class="table-title">
+                Sorted &amp; Renamed Files
+                <span class="count-badge" id="m1Count">0</span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>New Name</th>
+                            <th>Original</th>
+                            <th>Order ID</th>
+                            <th>Variant</th>
+                        </tr>
+                    </thead>
+                    <tbody id="m1Tbody"></tbody>
+                </table>
+                     </div>
+            </div>
+        </div>
+    </div>
+    <div class="tab-panel" id="tab-m2">
+    <div class="module-card" id="m2Card">
+        <div class="module-header">
+            <div class="step-circle" id="m2Circle">2</div>
+            <span class="module-title">
+                Shipping Label Generator
+                <span class="status-pill pill-pending" id="m2Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Upload one or more Amazon shipping-label PDFs. The tool
+            <strong>discards invoices</strong> (right halves), packs the
+            <strong>shipping labels side-by-side</strong> on new A4 pages, and
+            stamps a <strong>sequential number</strong> on every label.
+        </p>
+
+        <form id="m2Form" enctype="multipart/form-data">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="m2Files">PDF Files</label>
+                    <input
+                        type="file"
+                        class="form-input"
+                        id="m2Files"
+                        name="pdfs"
+                        accept=".pdf"
+                        multiple
+                    >
+                </div>
+                <div>
+                    <button type="submit" id="m2RunBtn" class="btn btn-primary">&#9654; Generate</button>
+                </div>
+            </div>
         </form>
+
+        <div id="m2Status" style="margin-top:14px; display:none;">
+            <span id="m2StatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+                 </div>
+        </div>
+    </div>
+    <div class="tab-panel" id="tab-m3">
+    <div class="module-card" id="m3Card">
+        <div class="module-header">
+            <div class="step-circle" id="m3Circle">3</div>
+            <span class="module-title">
+                Order PDF Preview
+                <span class="status-pill pill-pending" id="m3Pill">Ready</span>
+            </span>
+        </div>
+                <p class="module-desc">
+    Set a <strong>base folder</strong> and enter a <strong>4-digit order ID</strong>.
+    The tool searches all <strong>ship-output</strong> folders for matching PDFs
+    and lets you instantly preview them. Use <strong>Prev / Next</strong> to browse multiple files.
+</p>
+
+<div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+        <label for="m3Base">Base Folder</label>
+        <input type="text" class="form-input" id="m3Base" placeholder="C:\Users\you\Desktop\Orders">
+    </div>
+    <div>
+        <button id="m3SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+    </div>
+</div>
+
+<div class="form-row">
+    <div class="form-group" style="max-width:160px;">
+        <label for="m3OrderId">Order ID</label>
+        <input type="text" class="form-input" id="m3OrderId" placeholder="1234" maxlength="4">
+    </div>
+    <div>
+
+                <button id="m3SearchBtn" class="btn btn-primary">&#128269; Search</button>
+            </div>
+        </div>
+
+        <div id="m3Preview" style="display:none; margin-top:22px;">
+            <div class="pdf-nav" id="m3PdfNav">
+                <button class="btn btn-outline" id="m3PrevPdf">&larr; Prev</button>
+                <div class="pdf-nav-label" id="m3PdfLabel"></div>
+                <button class="btn btn-outline" id="m3NextPdf">Next &rarr;</button>
+            </div>
+            <div class="preview-container" id="m3Pages"></div>
+        </div>
+
+        <div id="m3Status" style="margin-top:14px; display:none;">
+            <span id="m3StatusText" style="font-size:.84rem;"></span>
+                    </div>
+        </div>
+    </div>
+     <div class="tab-panel" id="tab-m4">
+<div class="module-card" id="m4Card">
+        <div class="module-header">
+            <div class="step-circle" id="m4Circle">4</div>
+            <span class="module-title">
+                Find PDF by Image
+                <span class="status-pill pill-pending" id="m4Pill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Upload an image and a folder path containing PDFs. The tool scans every PDF
+            for matching images using <strong>perceptual hashing</strong> &mdash; works even with
+            camera photos of the original print. Click a result to preview.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="m4Folder">Folder Path</label>
+                <input type="text" class="form-input" id="m4Folder" placeholder="C:\Users\you\Desktop\Orders">
+            </div>
+            <div class="form-group" style="max-width:220px;">
+                <label for="m4Image">Image</label>
+                <input type="file" class="form-input" id="m4Image" accept="image/*">
+            </div>
+            <div>
+                <button id="m4SearchBtn" class="btn btn-primary">&#128269; Find</button>
+            </div>
+        </div>
+
+        <div id="m4Results" style="display:none; margin-top:22px;">
+            <div class="table-title">
+                Matching PDFs
+                <span class="count-badge" id="m4Count">0</span>
+            </div>
+            <div class="match-list" id="m4MatchList"></div>
+            <div id="m4Preview" style="display:none; margin-top:16px;">
+                <div class="pdf-nav-label" id="m4PdfLabel" style="margin-bottom:12px;"></div>
+                <div class="preview-container" id="m4Pages"></div>
+            </div>
+        </div>
+
+        <div id="m4Status" style="margin-top:14px; display:none;">
+            <span id="m4StatusText" style="font-size:.84rem;"></span>
+
+            <div id="m4Status" style="margin-top:14px; display:none;">
+            <span id="m4StatusText" style="font-size:.84rem;"></span>
+        </div>
+    </div>
+</div>
+</div>
+
+<div class="tab-panel active" id="tab-m5">
+<div class="module-card" id="m5Card">
+  <div class="module-header">
+    <div class="step-circle" id="m5Circle">5</div>
+    <span class="module-title">
+      Polaroid Image Placement
+      <span class="status-pill pill-pending" id="m5Pill">Ready</span>
+    </span>
+  </div>
+
+  <p class="module-desc">
+    Set a <strong>base folder</strong>, select a <strong>ship-date-image</strong> folder,
+    and bulk-process every order inside it. Each order is detected by its
+    <strong>4-digit ID</strong>, variant (<strong>4x3 / 3x2 / 3x3</strong>), and photo count.
+    Output PDFs are saved into a parallel <strong>ship-date-output</strong> folder automatically.
+  </p>
+
+  <div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+      <label for="m5Base">Base Folder</label>
+      <input type="text" class="form-input" id="m5Base" placeholder="C:\Users\you\Desktop\Orders">
+    </div>
+    <div>
+      <button id="m5SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:14px;">
+    <div class="form-group">
+      <label for="m5Ship">Ship Folder</label>
+      <select class="form-input" id="m5Ship" disabled>
+        <option value="">-- save base folder first --</option>
+      </select>
+    </div>
+    <div>
+      <button id="m5Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
+    </div>
+   <div>
+            <button id="m5ExtractBtn" class="btn btn-primary" disabled>&#128230; Extract Images</button>
+        </div>
+        <div>
+            <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+        </div>
+    <div>
+            <button id="m5WaBtn" class="btn btn-outline"
+            style="padding:10px 16px; background: rgba(37,211,102,0.1); border-color: rgba(37,211,102,0.4);
+            color: #25d366;" title="Import orders from WhatsApp chat export">&#128172; WA Import</button>
+        </div>
     </div>
 
-    <script>
-        const layoutSelect = document.getElementById('layout');
-        const maxInfo = document.getElementById('maxInfo');
-        const imageInput = document.getElementById('imageInput');
-        const fileCount = document.getElementById('fileCount');
-        const uploadArea = document.getElementById('uploadArea');
-        const form = document.getElementById('pdfForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const progressWrap = document.getElementById('progressWrap');
-        const progressFill = document.getElementById('progressFill');
-        const statusText = document.getElementById('statusText');
-        const errorMsg = document.getElementById('errorMsg');
-        const successMsg = document.getElementById('successMsg');
+    <div id="m5WaModal" style="display:none; margin:14px 0; padding:16px; border-radius:10px;
+    background: rgba(37,211,102,0.05); border:1px solid rgba(37,211,102,0.2);">
+        <p style="font-size:.82rem; color: #aaa; margin:0 0 10px;">
+        Upload a WhatsApp <strong>exported chat ZIP</strong> (with media). Orders will be sorted into folders.
+        </p>
+        <div class="form-row" style="margin-bottom:10px;">
+            <div class="form-group">
+                <label for="m5WaDest">Destination Folder</label>
+                <input type="text" class="form-input" id="m5WaDest" placeholder="C:\Users\you\Desktop\ship-date-images">
+            </div>
+            <div class="form-group" style="max-width:260px;">
+                <label for="m5WaZip">Chat ZIP</label>
+                <input type="file" class="form-input" id="m5WaZip" accept=".zip">
+            </div>
+        </div>
+        <div>
+            <button id="m5WaGoBtn" class="btn btn-success" style="padding:10px 18px;">&#128229; Import</button>
+        </div>
+        <div id="m5WaResult" style="display:none; font-size:.8rem; color: #ccc;"></div>
+    
+    
+    </div>
 
-        function getMaxImages() {
-            return parseInt(layoutSelect.selectedOptions[0].dataset.max);
-        }
+    <div class="progress-section" id="m5ExtProgress">
+        <div class="stage-timeline" id="m5ExtStages">
+            <span class="stage-chip" data-stage="scan">Scan</span>
+            <span class="stage-chip" data-stage="extract">Extract &amp; Cleanup</span>
+            <span class="stage-chip" data-stage="ocr">OCR Check</span>
+            <span class="stage-chip" data-stage="report">Report</span>
+            <span class="stage-chip" data-stage="done">Done</span>
+        </div>
+        <div style="margin-top:14px;">
+            <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" id="m5ExtBar"></div>
+                <div class="progress-pct" id="m5ExtPct">0%</div>
+            </div>
+        </div>
+        <div class="progress-meta">
+            <div class="progress-stage">
+                <div class="stage-dot" id="m5ExtDot"></div>
+                <span id="m5ExtStageLabel">Starting...</span>
+            </div>
+            <span id="m5ExtEta"></span>
+        </div>
+        <div class="progress-detail" id="m5ExtDetail"></div>
+        <div id="m5ExtOrderCurrent" style="margin-top:10px; font-size:.85rem; color: #c4b5fd; font-weight:600; display:none;"></div>
+    </div>
 
-        layoutSelect.addEventListener('change', () => {
-            maxInfo.textContent = `Max ${getMaxImages()} photos for this layout`;
-            validateFileCount();
+    <div class="summary-card" id="m5ExtSummary">
+        <h4>&#10003; Extract Image Completed</h4>
+        <div class="summary-grid">
+            <div class="summary-item">Total orders: <span id="m5ExtSumOrders">-</span></div>
+            <div class="summary-item">Total images: <span id="m5ExtSumImages">-</span></div>
+            <div class="summary-item">Zips extracted: <span id="m5ExtSumZips">-</span></div>
+            <div class="summary-item">Files deleted: <span id="m5ExtSumDeleted">-</span></div>
+            <div class="summary-item">OCR removed: <span id="m5ExtSumOcr">-</span></div>
+            <div class="summary-item">Time: <span id="m5ExtSumTime">-</span></div>
+            <div class="summary-item" style="grid-column:span 2;">Report: <span id="m5ExtSumReport">-</span></div>
+        </div>
+    </div>
+
+    <div class="table-section" id="m5ExtTable">
+        <div class="table-title">
+            Extract Image Results
+            <span class="count-badge" id="m5ExtCount">0</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Folder</th>
+                        <th>Order ID</th>
+                        <th>Images</th>
+                        <th>Zip</th>
+                        <th>OCR Removed</th>
+                    </tr>
+                </thead>
+                <tbody id="m5ExtTbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+  <div class="progress-section" id="m5Progress">
+    <div class="stage-timeline" id="m5Stages">
+      <span class="stage-chip" data-stage="scan">Scan</span>
+      <span class="stage-chip" data-stage="prepare">Prepare</span>
+      <span class="stage-chip" data-stage="process">Process</span>
+      <span class="stage-chip" data-stage="preview">Preview</span>
+      <span class="stage-chip" data-stage="done">Done</span>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" id="m5Bar"></div>
+        <div class="progress-pct" id="m5Pct">0%</div>
+      </div>
+    </div>
+
+    <div class="progress-meta">
+      <div class="progress-stage">
+        <div class="stage-dot" id="m5Dot"></div>
+        <span id="m5StageLabel">Starting...</span>
+      </div>
+      <span id="m5Eta"></span>
+    </div>
+
+    <div class="progress-detail" id="m5Detail"></div>
+    <div id="m5OrderCurrent" style="margin-top:10px; font-size:.85rem; color:#c4b5fd; font-weight:600; display:none;"></div>
+  </div>
+
+  <div class="summary-card" id="m5Summary">
+    <h4>&#10003; Completed</h4>
+    <div class="summary-grid">
+      <div class="summary-item">Orders processed: <span id="m5SumProcessed"></span></div>
+      <div class="summary-item">Orders skipped: <span id="m5SumSkipped"></span></div>
+      <div class="summary-item">PDFs generated: <span id="m5SumPdfs"></span></div>
+      <div class="summary-item">Time: <span id="m5SumTime"></span></div>
+            <div class="summary-item" style="grid-column:span 2;">Output: <span id="m5SumOutput"></span></div>
+    </div>
+  </div>
+
+  <div class="table-section" id="m5Table">
+    <div class="table-title">
+      Order Results
+      <span class="count-badge" id="m5Count">0</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Folder</th>
+            <th>Order ID</th>
+            <th>Variant</th>
+            <th>Photos</th>
+            <th>PDFs</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="m5Tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="border-top: 1px solid rgba(255,255,255,.08); margin-top: 24px; padding-top: 20px;">
+    <h4 style="color:#c4b5fd; font-size:.95rem; margin-bottom:12px;">&#128269; Order Search</h4>
+    <p class="module-desc" style="margin-bottom:14px;">
+      Enter a <strong>4-digit order ID</strong> to search across all ship-image and output folders in the base folder.
+    </p>
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group" style="max-width:160px;">
+        <label for="m5SearchId">Order ID</label>
+        <input type="text" class="form-input" id="m5SearchId" placeholder="1234" maxlength="4">
+      </div>
+      <div>
+        <button id="m5SearchBtn" class="btn btn-primary" style="padding:10px 18px;">&#128269; Search</button>
+      </div>
+    </div>
+
+    <div id="m5SearchSummary" style="display:none; margin-bottom:14px;">
+      <div class="summary-card" style="margin-top:0;">
+        <h4 id="m5SearchTitle">Search Results</h4>
+        <div class="summary-grid">
+          <div class="summary-item">Order ID: <span id="m5SearchOid"></span></div>
+          <div class="summary-item">Total matches: <span id="m5SearchTotal"></span></div>
+          <div class="summary-item">Input folders: <span id="m5SearchInput"></span></div>
+          <div class="summary-item">Output PDFs: <span id="m5SearchOutput"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-section" id="m5SearchTable" style="display:none;">
+      <div class="table-title">
+        Matches
+        <span class="count-badge" id="m5SearchCount">0</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Ship Folder</th>
+              <th>Type</th>
+              <th>Name</th>
+              <th>Variant</th>
+              <th>Photos</th>
+            </tr>
+          </thead>
+          <tbody id="m5SearchTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="m5SearchStatus" style="margin-top:10px; display:none;">
+      <span id="m5SearchStatusText" style="font-size:.84rem;"></span>
+    </div>
+  </div>
+</div>
+</div>
+<div class="tab-panel" id="tab-m6">
+  <div class="module-card" id="m6Card">
+    <div class="module-header">
+      <div class="step-circle" id="m6Circle">6</div>
+      <span class="module-title">
+        Final Label
+        <span class="status-pill pill-pending" id="m6Pill">Ready</span>
+      </span>
+    </div>
+
+    <p class="module-desc">
+      Upload the <strong>shipping labels PDF</strong> (output from Shipping Labels tool).
+      The tool extracts order IDs from each label, matches them against PDFs in all
+      <strong>ship-output</strong> folders, creates a filtered label PDF per output folder,
+      and generates a <strong>label-report.txt</strong> showing matched and <strong>cancelled</strong> orders.
+    </p>
+
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="m6Base">Base Folder</label>
+        <input type="text" class="form-input" id="m6Base" placeholder="C:\Users\you\Desktop\Orders">
+      </div>
+      <div>
+        <button id="m6SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="m6Files">Label PDFs</label>
+        <input type="file" class="form-input" id="m6Files" accept=".pdf" multiple>
+      </div>
+      <div>
+        <button id="m6RunBtn" class="btn btn-success" disabled>&#9654; Process</button>
+      </div>
+    </div>
+
+    <div id="m6Status" style="margin-top:14px; display:none;">
+      <span id="m6StatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+    </div>
+
+    <div class="summary-card" id="m6Summary">
+      <h4>&#10003; Completed</h4>
+      <div class="summary-grid">
+        <div class="summary-item">Output folders processed: <span id="m6SumFolders">&ndash;</span></div>
+        <div class="summary-item">Labels parsed: <span id="m6SumParsed">&ndash;</span></div>
+        <div class="summary-item">Unique label IDs: <span id="m6SumUnique">&ndash;</span></div>
+        <div class="summary-item">Total matched: <span id="m6SumMatched">&ndash;</span></div>
+        <div class="summary-item">Total cancelled: <span id="m6SumCancelled">&ndash;</span></div>
+        <div class="summary-item">Label PDFs created: <span id="m6SumPdfs">&ndash;</span></div>
+      </div>
+    </div>
+
+    <div class="table-section" id="m6Table">
+      <div class="table-title">
+        Results by Output Folder
+        <span class="count-badge" id="m6Count">0</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Output Folder</th>
+              <th>Total Orders</th>
+              <th>Matched</th>
+              <th>Cancelled</th>
+              <th>Cancelled IDs</th>
+              <th>Label PDF</th>
+            </tr>
+          </thead>
+          <tbody id="m6Tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="previewOverlay" class="pv-overlay" style="display:none;">
+  <div class="pv-header">
+    <div class="pv-title">
+      <span id="pvOrderName">Order Preview</span>
+      <span class="pv-sub" id="pvPdfLabel">PDF 1/1</span>
+    </div>
+    <div class="pv-actions">
+      <button id="pvResetBtn" class="btn btn-outline pv-btn" title="Reset all to centre">&#8634; Reset</button>
+      <button id="pvSaveBtn" class="btn btn-success pv-btn">&#10003; Save &amp; Continue</button>
+    </div>
+  </div>
+  <div class="pv-body">
+    <div class="pv-sheet-wrap">
+      <div id="pvSheet" class="pv-sheet">
+        <!-- cells are injected here by JS -->
+      </div>
+    </div>
+    <!-- Loading spinner between orders -->
+    <div id="pvLoader" class="pv-loader" style="display:none;">
+      <div class="pv-spinner"></div>
+      <div class="pv-loader-text" id="pvLoaderText">Generating PDF &amp; loading next order...</div>
+    </div>
+    <div class="pv-info">
+      <span id="pvHint">Click an image to see the full photo, then drag to adjust crop</span>
+    </div>
+  </div>
+</div>
+
+<style>
+/* --- Preview overlay ---------------------------------------------------- */
+.pv-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(10, 10, 20, 0.97);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.pv-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 24px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.pv-title { display: flex; align-items: center; gap: 12px; }
+.pv-title span:first-child {
+  font-size: 1.1rem; font-weight: 700; color: #f0f0f0;
+}
+.pv-sub {
+  font-size: .78rem; color: #888;
+  padding: 2px 10px; border-radius: 12px;
+  background: rgba(124,58,237,0.15);
+}
+.pv-actions { display: flex; gap: 10px; }
+.pv-btn { padding: 8px 20px; font-size: .82rem; }
+
+.pv-body {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  overflow: auto; padding: 8px;
+}
+.pv-sheet-wrap {
+  display: flex; align-items: center; justify-content: center;
+  flex: 1; width: 100%;
+}
+.pv-sheet {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  /* dimensions set by JS based on layout */
+}
+.pv-cell {
+  position: absolute;
+  overflow: hidden;
+  cursor: grab;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #f0f0f0;
+  transition: box-shadow .2s;
+}
+.pv-cell:active { cursor: grabbing; }
+.pv-cell img {
+  position: absolute;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+/* --- Active cell: show full image with dimmed overflow --- */
+.pv-cell.pv-active {
+  overflow: visible;
+  z-index: 8;
+  border-color: rgba(124,58,237,0.7);
+  box-shadow: 0 0 2px rgba(124,58,237,0.5);
+}
+.pv-cell.pv-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.pv-cell.pv-active img {
+  opacity: 0.35;
+  z-index: 0;
+}
+.pv-cell .pv-bright-clone {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+}
+.pv-cell.pv-active .pv-bright-clone {
+  display: block;
+}
+.pv-cell .pv-bright-clone img {
+  position: absolute;
+  opacity: 1;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+.pv-cell-index {
+  position: absolute; top: 2px; left: 4px;
+  font-size: 9px; color: rgba(0,0,0,0.35);
+  font-weight: 700; z-index: 4;
+  pointer-events: none;
+}
+.pv-label {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 10px; color: #000; font-weight: 600;
+  white-space: nowrap; pointer-events: none;
+}
+.pv-cutmark {
+  position: absolute; background: #000;
+}
+.pv-info {
+  flex-shrink: 0; padding: 8px 0;
+  font-size: .78rem; color: #777; text-align: center;
+}
+.pv-toggle {
+  position: absolute; bottom: 3px; right: 3px; z-index: 3;
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 8px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; cursor: pointer; border: none;
+  transition: background .15s, color .15s;
+  pointer-events: auto;
+}
+.pv-toggle.fill {
+  background: rgba(124,58,237,0.8); color: #fff;
+}
+.pv-toggle.fit {
+  background: rgba(234,179,8,0.85); color: #000;
+}
+
+.pv-rotate {
+    position: absolute; bottom: 3px; left: 3px; z-index: 3;
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 9px; font-weight: 700;
+    cursor: pointer; border: none;
+    background: rgba(20,184,166,0.85); color: #fff;
+    transition: background .15s;
+    pointer-events: auto; line-height: 1;
+}
+.pv-rotate:hover { background: rgba(20,184,166,1); }
+.pv-rotate.rotated { background: rgba(244,63,94,0.9); }
+.pv-zoom {
+    position: absolute; top: 2px; right: 3px; z-index: 3;
+    display: flex; gap: 2px;
+    pointer-events: auto;
+}
+.pv-zoom button {
+    padding: 0px 4px; border-radius: 3px;
+    font-size: 10px; font-weight: 700;
+    cursor: pointer; border: none;
+    background: rgba(59,130,246,0.85); color: #fff;
+    transition: background .15s;
+    line-height: 1.3;
+}
+.pv-zoom button:hover { background: rgba(59,130,246,1); }
+/* Loader between orders */
+.pv-loader {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(10, 10, 20, 0.88);
+}
+.pv-spinner {
+  width: 48px; height: 48px; border-radius: 50%;
+  border: 4px solid rgba(124,58,237,0.2);
+  border-top-color: #a78bfa;
+  animation: pvSpin 0.8s linear infinite;
+}
+@keyframes pvSpin { to { transform: rotate(360deg); } }
+.pv-loader-text {
+  margin-top: 16px; font-size: .88rem; color: #aaa;
+  font-weight: 500;
+}
+</style>
+
+
+<script>
+// --- Tab switching ----------------------------------------------
+(function () {
+    var tabBtns = document.querySelectorAll('#tabBar .tab-btn');
+    var tabPanels = document.querySelectorAll('.tab-panel');
+    tabBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            tabBtns.forEach(function (b) { b.classList.remove('active'); });
+            tabPanels.forEach(function (p) { p.classList.remove('active'); });
+            btn.classList.add('active');
+            var panel = document.getElementById(btn.dataset.tab);
+            if (panel) panel.classList.add('active');
         });
+    });
+})();
+</script>
 
-        imageInput.addEventListener('change', validateFileCount);
+<script>
+(function () {
+    const STAGE_ORDER = ['cleanup', 'scan', 'sort', 'rename', 'combine', 'report', 'done'];
 
-        function validateFileCount() {
-            const max = getMaxImages();
-            const count = imageInput.files.length;
-            if (count === 0) {
-                fileCount.textContent = '';
-                fileCount.className = 'file-count';
+    const $baseInput = document.getElementById('m1Base');
+    const $saveBase  = document.getElementById('m1SaveBase');
+    const $outputSel = document.getElementById('m1OutputFolder');
+    const $refresh   = document.getElementById('m1Refresh');
+    const $btn       = document.getElementById('m1RunBtn');
+    const $circle    = document.getElementById('m1Circle');
+    const $pill      = document.getElementById('m1Pill');
+    const $progress  = document.getElementById('m1Progress');
+    const $bar       = document.getElementById('m1Bar');
+    const $pct       = document.getElementById('m1Pct');
+    const $dot       = document.getElementById('m1Dot');
+    const $stage     = document.getElementById('m1StageLabel');
+    const $eta       = document.getElementById('m1Eta');
+    const $detail    = document.getElementById('m1Detail');
+    const $summary   = document.getElementById('m1Summary');
+    const $table     = document.getElementById('m1Table');
+    const $tbody     = document.getElementById('m1Tbody');
+    const $count     = document.getElementById('m1Count');
+    const $alert     = document.getElementById('m1Alert');
+    const $alertTx   = document.getElementById('m1AlertText');
+
+    let completedStages = new Set();
+
+    // --- Load saved base folder on init ---
+    fetch('/module1/base-folder').then(r => r.json()).then(data => {
+        if (data.folder) {
+            $baseInput.value = data.folder;
+            loadOutputFolders();
+        }
+    });
+
+    $saveBase.addEventListener('click', function () {
+        const folder = $baseInput.value.trim();
+        if (!folder) { showAlert('danger', 'Enter a base folder path.'); return; }
+
+        fetch('/module1/base-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder: folder })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { showAlert('danger', data.error); return; }
+            $baseInput.value = data.folder;
+            loadOutputFolders();
+        });
+    });
+
+    // --- Load output folders into dropdown ---
+    function loadOutputFolders() {
+        $outputSel.disabled = true;
+        $outputSel.innerHTML = '<option value="">Loading...</option>';
+        $refresh.disabled = true;
+        $btn.disabled = true;
+
+        fetch('/module1/output-folders').then(r => r.json()).then(data => {
+            if (data.error) {
+                $outputSel.innerHTML = '<option value="">— ' + data.error + ' —</option>';
                 return;
             }
-            if (count > max) {
-                fileCount.textContent = `${count} files selected &mdash; exceeds max ${max}!`;
-                fileCount.className = 'file-count error';
-            } else {
-                fileCount.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
-                fileCount.className = 'file-count';
+            if (!data.folders.length) {
+                $outputSel.innerHTML = '<option value="">— No output folders found —</option>';
+                $refresh.disabled = false;
+                return;
             }
-        }
-
-        ['dragover', 'dragenter'].forEach(e => {
-            uploadArea.addEventListener(e, (ev) => {
-                ev.preventDefault();
-                uploadArea.classList.add('dragover');
+            var opts = '<option value="">— Select output folder —</option>';
+            data.folders.forEach(function (f) {
+                opts += '<option value="' + f.path.replace(/"/g, '&quot;') + '">'
+                     + f.name + ' (' + f.pdf_count + ' PDFs)</option>';
             });
+            $outputSel.innerHTML = opts;
+            $outputSel.disabled = false;
+            $refresh.disabled = false;
         });
-        ['dragleave', 'drop'].forEach(e => {
-            uploadArea.addEventListener(e, () => uploadArea.classList.remove('dragover'));
+    }
+
+    $refresh.addEventListener('click', loadOutputFolders);
+
+    $outputSel.addEventListener('change', function () {
+        $btn.disabled = !$outputSel.value;
+    });
+    function showAlert(type, msg) {
+        $alert.className = 'alert alert-' + type + ' visible';
+        $alertTx.textContent = msg;
+    }
+
+    function setStageChip(stageName, state) {
+        const chips = document.querySelectorAll('#m1Stages .stage-chip');
+        chips.forEach(c => {
+            if (c.dataset.stage === stageName) {
+                c.classList.remove('active', 'completed', 'errored');
+                c.classList.add(state);
+            }
         });
+    }
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            errorMsg.style.display = 'none';
-            successMsg.style.display = 'none';
+    function markPriorStagesCompleted(currentStage) {
+        const idx = STAGE_ORDER.indexOf(currentStage);
+        for (let i = 0; i < idx; i++) {
+            if (!completedStages.has(STAGE_ORDER[i])) {
+                completedStages.add(STAGE_ORDER[i]);
+                setStageChip(STAGE_ORDER[i], 'completed');
+            }
+        }
+    }
 
-            const max = getMaxImages();
-            const count = imageInput.files.length;
+    function formatEta(sec) {
+        if (sec == null || sec <= 0) return '';
+        if (sec < 60) return '~' + Math.ceil(sec) + 's remaining';
+        const m = Math.floor(sec / 60);
+                const s = Math.ceil(sec % 60);
+        return '~' + m + 'm ' + s + 's remaining';
+    }
 
-            if (count === 0) {
-                showError('Please select at least one photo.');
+    function resetUI() {
+        $progress.classList.remove('visible');
+        $summary.classList.remove('visible');
+        $table.classList.remove('visible');
+        $bar.style.width = '0%';
+        $bar.classList.remove('done', 'error');
+        $pct.textContent = '0%';
+        $dot.classList.remove('done', 'error');
+        $stage.textContent = 'Starting...';
+        $eta.textContent = '';
+        $detail.textContent = '';
+        $tbody.innerHTML = '';
+        $count.textContent = '0';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        $alert.classList.remove('visible');
+        completedStages = new Set();
+        document.querySelectorAll('#m1Stages .stage-chip').forEach(c => {
+            c.classList.remove('active', 'completed', 'errored');
+        });
+    }
+
+function enableControls() {
+        $btn.disabled = !$outputSel.value;
+        $outputSel.disabled = false;
+        $refresh.disabled = false;
+    }
+
+    $btn.addEventListener('click', function () {
+        const folder = $outputSel.value;
+        if (!folder) {
+            showAlert('danger', 'Please select an output folder.');
+            return;
+        }
+
+        resetUI();
+        $btn.disabled = true;
+        $outputSel.disabled = true;
+        $refresh.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+        $progress.classList.add('visible');
+
+        fetch('/module1/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_path: folder }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                showAlert('danger', data.error);
+         enableControls();
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
                 return;
             }
-            if (count > max) {
-                showError(`Too many photos! This layout supports max ${max}, you selected ${count}.`);
+            subscribeSSE(data.task_id);
+        })
+        .catch(err => {
+            showAlert('danger', 'Request failed: ' + err.message);
+            enableControls();
+        });
+        });
+
+    function subscribeSSE(taskId) {
+        const es = new EventSource('/module1/progress/' + encodeURIComponent(taskId));
+
+        es.onmessage = function (ev) {
+            const d = JSON.parse(ev.data);
+
+            if (d.error) {
+                es.close();
+                $bar.style.width = '100%';
+                $bar.classList.add('error');
+                $pct.textContent = 'Error';
+                $dot.classList.add('error');
+                $stage.textContent = 'Failed';
+                $detail.textContent = d.error;
+                $eta.textContent = '';
+                setStageChip(d.stage || 'error', 'errored');
+                $pill.className = 'status-pill';
+                $pill.style.background = 'rgba(239,68,68,0.15)';
+                $pill.style.color = '#f87171';
+                $pill.textContent = 'Error';
+                enableControls();
+                return;
+            }
+                        const pct = Math.min(d.pct, 100);
+            $bar.style.width = pct + '%';
+            $pct.textContent = pct + '%';
+            $stage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+            $detail.textContent = d.detail || '';
+            $eta.textContent = formatEta(d.eta_sec);
+
+            markPriorStagesCompleted(d.stage);
+            if (!d.done) {
+                setStageChip(d.stage, 'active');
+            }
+
+            if (d.done) {
+                es.close();
+                completedStages.add(d.stage);
+                STAGE_ORDER.forEach(s => setStageChip(s, 'completed'));
+                $bar.classList.add('done');
+                $dot.classList.add('done');
+                $circle.classList.add('done');
+                $pill.className = 'status-pill pill-done';
+                $pill.innerHTML = '&#10003; Done';
+                $eta.textContent = '';
+
+                if (d.result) {
+                    const r = d.result;
+                 document.getElementById('sumTotal').textContent = r.total_boards;
+            document.getElementById('sumIds').textContent = r.unique_ids || '-';
+            document.getElementById('sumBoards4x3').textContent = r.boards_4x3;
+            document.getElementById('sumBoards3x2').textContent = r.boards_3x2;
+            document.getElementById('sumBoards3x3').textContent = r.boards_3x3;
+                    document.getElementById('sumTime').textContent = r.elapsed + 's';
+                    document.getElementById('sumPdf').textContent = r.combined_pdf;
+                    document.getElementById('sumZip').textContent = r.zip_file;
+                    $summary.classList.add('visible');
+
+                    if (r.sorted_list && r.sorted_list.length) {
+                        $count.textContent = r.sorted_list.length;
+                        $tbody.innerHTML = r.sorted_list.map((item, i) =>
+                            '<tr>' +
+                                '<td>' + (i + 1) + '</td>' +
+                                '<td><span class="code-name">' + escHtml(item.new_name) + '</span></td>' +
+                                '<td>' + escHtml(item.original) + '</td>' +
+                                '<td><span class="tag tag-id">' + (item.four_digit_id || '-') + '</span></td>' +
+                                '<td><span class="tag tag-variant">' + escHtml(item.variant) + '</span></td>' +
+                            '</tr>'
+                        ).join('');
+                        $table.classList.add('visible');
+                    }
+                }
+
+        enableControls();
+            }
+        };
+
+        es.onerror = function () {
+            es.close();
+            $stage.textContent = 'Connection lost';
+            $dot.classList.add('error');
+            enableControls();
+        };
+    }
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+
+})();
+
+(function () {
+    const $form      = document.getElementById('m2Form');
+    const $files     = document.getElementById('m2Files');
+    const $btn       = document.getElementById('m2RunBtn');
+    const $pill      = document.getElementById('m2Pill');
+    const $circle    = document.getElementById('m2Circle');
+    const $status    = document.getElementById('m2Status');
+    const $statusTx  = document.getElementById('m2StatusText');
+
+    $form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!$files.files.length) {
+            $statusTx.textContent = 'Please select at least one PDF file.';
+            $statusTx.style.color = '#f87171';
+            $status.style.display = 'block';
+            return;
+        }
+                $btn.disabled = true;
+        $files.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Processing';
+        $statusTx.textContent = 'Uploading & processing...';
+        $statusTx.style.color = '#60a5fa';
+        $status.style.display = 'block';
+
+        const fd = new FormData();
+        for (const f of $files.files) fd.append('pdfs', f);
+
+        fetch('/shipping-labels', { method: 'POST', body: fd })
+        .then(function (resp) {
+            if (!resp.ok) return resp.json().then(function (j) { throw new Error(j.error || 'Server error'); });
+            return resp.blob();
+        })
+        .then(function (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'optimized_shipping_labels.pdf';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; Done';
+            $circle.classList.add('done');
+            $statusTx.textContent = 'Download started!';
+            $statusTx.style.color = '#4ade80';
+        })
+        .catch(function (err) {
+            $pill.className = 'status-pill';
+            $pill.style.background = 'rgba(239,68,68,0.15)';
+            $pill.style.color = '#f87171';
+            $pill.textContent = 'Error';
+            $statusTx.textContent = err.message;
+            $statusTx.style.color = '#f87171';
+        })
+        .finally(function () {
+            $btn.disabled = false;
+            $files.disabled = false;
+        });
+    });
+})();
+</script>
+
+<script>
+(function () {
+    let m3State = null; // { search_id, matches, currentIdx }
+
+    const $baseInput = document.getElementById('m3Base');
+    const $saveBase  = document.getElementById('m3SaveBase');
+    const $orderId   = document.getElementById('m3OrderId');
+    const $btn       = document.getElementById('m3SearchBtn');
+    const $pill      = document.getElementById('m3Pill');
+    const $circle    = document.getElementById('m3Circle');
+    const $preview   = document.getElementById('m3Preview');
+    const $pdfNav    = document.getElementById('m3PdfNav');
+    const $pdfLabel  = document.getElementById('m3PdfLabel');
+    const $pages     = document.getElementById('m3Pages');
+    const $prevBtn   = document.getElementById('m3PrevPdf');
+    const $nextBtn   = document.getElementById('m3NextPdf');
+    const $status    = document.getElementById('m3Status');
+    const $statusTx  = document.getElementById('m3StatusText');
+
+    fetch('/module3/base-folder').then(r => r.json()).then(data => {
+        if (data.folder) { $baseInput.value = data.folder; }
+    });
+
+    // --- Save base folder ---
+    $saveBase.addEventListener('click', function () {
+        const folder = $baseInput.value.trim();
+        if (!folder) { showStatus('Enter a base folder path.', '#f87171'); return; }
+
+        fetch('/module3/base-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder: folder })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { showStatus(data.error, '#f87171'); return; }
+            $baseInput.value = data.folder;
+            showStatus('Base folder saved.', '#4ade80');
+        });
+    });
+
+    function showStatus(msg, color) {
+        $statusTx.textContent = msg;
+        $statusTx.style.color = color;
+        $status.style.display = 'block';
+    }
+
+    function resetM3() {
+        $preview.style.display = 'none';
+        $status.style.display = 'none';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        m3State = null;
+    }
+
+    function doSearch() {
+
+        const orderId = $orderId.value.trim();
+
+      
+        if (!/^\d{4}$/.test(orderId)) { showStatus('Order ID must be exactly 4 digits.', '#f87171'); return; }
+
+        resetM3();
+        $btn.disabled = true;
+                $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Searching';
+
+        fetch('/module3/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({  order_id: orderId }),
+        })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
+        .then(function (res) {
+            if (!res.ok || res.data.error) {
+                showStatus(res.data.error || 'Search failed.', '#f87171');
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
                 return;
             }
 
-            submitBtn.disabled = true;
-            progressWrap.style.display = 'block';
-            progressFill.style.width = '0%';
-            statusText.textContent = 'Uploading & processing...';
+            m3State = { search_id: res.data.search_id, matches: res.data.matches, currentIdx: 0 };
 
-            const formData = new FormData(form);
+            var n = res.data.matches.length;
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; ' + n + ' PDF' + (n > 1 ? 's' : '') + ' found';
+            $circle.classList.add('done');
 
-            try {
-                progressFill.style.width = '30%';
-                statusText.textContent = 'Uploading photos...';
+            renderCurrentPdf();
+            $preview.style.display = 'block';
+        })
+        .catch(function (err) {
+            showStatus('Request failed: ' + err.message, '#f87171');
+            $pill.className = 'status-pill pill-pending';
+            $pill.textContent = 'Ready';
+        })
+        .finally(function () { $btn.disabled = false; });
+    }
 
-                const resp = await fetch('/generate', {
-                    method: 'POST',
-                    body: formData
+    function renderCurrentPdf() {
+        if (!m3State) return;
+        var s = m3State, match = s.matches[s.currentIdx];
+
+        $pdfNav.style.display = s.matches.length > 1 ? 'flex' : 'none';
+        var folderInfo = match.folder_name ? ' &nbsp;|&nbsp; ' + escHtml3(match.folder_name) : '';
+        $pdfLabel.innerHTML =
+            escHtml3(match.filename) +
+            '<small>' + match.page_count + ' page' + (match.page_count > 1 ? 's' : '') +
+                folderInfo + '</small>';
+            (s.matches.length > 1 ? '&nbsp;|&nbsp; PDF ' + (s.currentIdx + 1) + ' of ' + s.matches.length : '') +
+            '</small>';
+
+        $prevBtn.disabled = s.currentIdx === 0;
+        $nextBtn.disabled = s.currentIdx === s.matches.length - 1;
+
+        $pages.innerHTML = '';
+        for (var p = 0; p < match.page_count; p++) {
+            var img = document.createElement('img');
+            img.src = '/module3/page/' + s.search_id + '/' + s.currentIdx + '/' + p;
+            img.alt = 'Page ' + (p + 1);
+            if (p > 0) img.loading = 'lazy';
+            $pages.appendChild(img);
+        }
+    }
+
+    function changePdf(dir) {
+        if (!m3State) return;
+        var idx = m3State.currentIdx + dir;
+        if (idx < 0 || idx >= m3State.matches.length) return;
+        m3State.currentIdx = idx;
+        renderCurrentPdf();
+        $pages.scrollTop = 0;
+    }
+
+    function escHtml3(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    $btn.addEventListener('click', doSearch);
+    $prevBtn.addEventListener('click', function () { changePdf(-1); });
+    $nextBtn.addEventListener('click', function () { changePdf(1); });
+    $orderId.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+    
+    $orderId.addEventListener('input', function () {
+        this.value = this.value.replace(/[^0-9]/g, '');
+    });
+})();
+</script>
+
+<script>
+(function () {
+    let m4State = null;
+
+    const $folder = document.getElementById('m4Folder');
+    const $image = document.getElementById('m4Image');
+    const $btn = document.getElementById('m4SearchBtn');
+    const $pill = document.getElementById('m4Pill');
+    const $circle = document.getElementById('m4Circle');
+    const $results = document.getElementById('m4Results');
+    const $count = document.getElementById('m4Count');
+    const $matchList = document.getElementById('m4MatchList');
+    const $preview = document.getElementById('m4Preview');
+    const $pdfLabel = document.getElementById('m4PdfLabel');
+    const $pages = document.getElementById('m4Pages');
+    const $status = document.getElementById('m4Status');
+    const $statusTx = document.getElementById('m4StatusText');
+
+    function showStatus(msg, color) {
+        $statusTx.innerHTML = msg;
+        $statusTx.style.color = color;
+        $status.style.display = 'block';
+    }
+
+    function resetM4() {
+        $results.style.display = 'none';
+        $preview.style.display = 'none';
+        $status.style.display = 'none';
+        $matchList.innerHTML = '';
+        $circle.classList.remove('done');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        m4State = null;
+    }
+
+    function simClass(s) {
+        if (s >= 90) return 'sim-high';
+        if (s >= 80) return 'sim-medium';
+        return 'sim-low';
+    }
+
+    function escH(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function doFind() {
+        var folder = $folder.value.trim();
+        if (!folder) { showStatus('Please enter a folder path.', '#f87171'); return; }
+        if (!$image.files.length) { showStatus('Please select an image file.', '#f87171'); return; }
+
+        resetM4();
+        $btn.disabled = true;
+        $image.disabled = true;
+        $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '<span class="m4-spinner"></span> Scanning';
+        showStatus('Scanning PDFs for matching images...', '#60a5fa');
+
+        var fd = new FormData();
+        fd.append('folder_path', folder);
+        fd.append('image', $image.files[0]);
+
+        fetch('/module4/search', { method: 'POST', body: fd })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j }; }); })
+        .then(function (res) {
+            if (!res.ok || res.data.error) {
+                showStatus(res.data.error || 'Search failed.', '#f87171');
+                $pill.className = 'status-pill pill-pending';
+                $pill.textContent = 'Ready';
+                return;
+            }
+
+            m4State = { search_id: res.data.search_id, matches: res.data.matches };
+            var n = res.data.matches.length;
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; ' + n + ' match' + (n > 1 ? 'es' : '');
+            $circle.classList.add('done');
+            $count.textContent = n;
+            $status.style.display = 'none';
+
+            $matchList.innerHTML = res.data.matches.map(function (m, i) {
+                return '<div class="match-item" data-idx="' + i + '">' +
+                    '<span class="match-filename">' + escH(m.filename) +
+                    '<small>' + m.page_count + ' page' + (m.page_count > 1 ? 's' : '') + '</small></span>' +
+                    '<span class="similarity-badge ' + simClass(m.similarity) + '">' + m.similarity + '%</span>' +
+                    '</div>';
+            }).join('');
+            $matchList.querySelectorAll('.match-item').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    var idx = parseInt(this.dataset.idx);
+                    $matchList.querySelectorAll('.match-item').forEach(function (e) { e.classList.remove('active'); });
+                    this.classList.add('active');
+                    showPreview(idx);
                 });
+            });
 
-                progressFill.style.width = '80%';
-                statusText.textContent = 'Generating PDF...';
+            $results.style.display = 'block';
 
-                if (!resp.ok) {
-let errText = 'Server error';
-		try{
-const data = await resp.json();
-errText = data.error || errText;
-                    
-}
-catch(_){
-const text = await resp.text().catch(() => '');
-if(resp.status === 413){
-errText ='upload toolarge';
-}
-else if(text){
-errText = text.substring(0,200);
+            if (n === 1) {
+                $matchList.querySelector('.match-item').classList.add('active');
+                showPreview(0);
+            }
+        })
+        .catch(function (err) {
+            showStatus('Request failed: ' + err.message, '#f87171');
+            $pill.className = 'status-pill pill-pending';
+            $pill.textContent = 'Ready';
+        })
+        .finally(function () {
+            $btn.disabled = false;
+            $image.disabled = false;
+        });
+    }
 
-}
-else{
-errText = 'Server Error';
-}
-}
-throw new Error(errText);
+    function showPreview(idx) {
+        if (!m4State) return;
+        var match = m4State.matches[idx];
+        $pdfLabel.innerHTML = escH(match.filename) +
+            ' <small style="display:inline;color:#888;">(' + match.page_count + ' page' +
+            (match.page_count > 1 ? 's' : '') + ' &bull; ' + match.similarity + '% match)</small>';
+
+        $pages.innerHTML = '';
+        for (var p = 0; p < match.page_count; p++) {
+            var img = document.createElement('img');
+            img.src = '/module3/page/' + m4State.search_id + '/' + idx + '/' + p;
+            img.alt = 'Page ' + (p + 1);
+            if (p > 0) img.loading = 'lazy';
+            $pages.appendChild(img);
+        }
+        $preview.style.display = 'block';
+        $pages.scrollTop = 0;
+    }
+
+    $btn.addEventListener('click', doFind);
+    $folder.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doFind(); } });
+})();
+</script>
+<script>
+(function () {
+  var M5_STAGES = ['scan','prepare','process','preview','done'];
+
+  var $base       = document.getElementById('m5Base');
+  var $saveBase   = document.getElementById('m5SaveBase');
+  var $ship       = document.getElementById('m5Ship');
+  var $refresh    = document.getElementById('m5Refresh');
+  var $runBtn     = document.getElementById('m5RunBtn');
+  var $extractBtn = document.getElementById('m5ExtractBtn');
+  var $circle     = document.getElementById('m5Circle');
+  var $pill       = document.getElementById('m5Pill');
+  var $progress   = document.getElementById('m5Progress');
+  var $bar        = document.getElementById('m5Bar');
+  var $pct        = document.getElementById('m5Pct');
+  var $dot        = document.getElementById('m5Dot');
+  var $stage      = document.getElementById('m5StageLabel');
+  var $eta        = document.getElementById('m5Eta');
+  var $detail     = document.getElementById('m5Detail');
+  var $orderCur   = document.getElementById('m5OrderCurrent');
+  var $summary    = document.getElementById('m5Summary');
+  var $table      = document.getElementById('m5Table');
+  var $tbody      = document.getElementById('m5Tbody');
+  var $count      = document.getElementById('m5Count');
+
+  var completedStages = new Set();
+
+  function escH5(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function setChip(name, state) {
+    document.querySelectorAll('#m5Stages .stage-chip').forEach(function (c) {
+      if (c.dataset.stage === name) {
+        c.classList.remove('active','completed','errored');
+        c.classList.add(state);
+      }
+    });
   }
 
-                progressFill.style.width = '100%';
-                statusText.textContent = 'Done ✓';
+  function markPrior(cur) {
+    var idx = M5_STAGES.indexOf(cur);
+    for (var i = 0; i < idx; i++) {
+      if (!completedStages.has(M5_STAGES[i])) {
+        completedStages.add(M5_STAGES[i]);
+        setChip(M5_STAGES[i], 'completed');
+      }
+    }
+  }
 
-                const blob = await resp.blob();
-                const orderName = document.getElementById('orderName').value.trim() || 'Order';
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${orderName}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
+  function resetM5() {
+    $progress.classList.remove('visible');
+    $summary.classList.remove('visible');
+    $table.classList.remove('visible');
+    $bar.style.width = '0%';
+    $bar.classList.remove('done','error');
+    $pct.textContent = '0%';
+    $dot.classList.remove('done','error');
+    $stage.textContent = 'Starting...';
+    $eta.textContent = '';
+    $detail.textContent = '';
+    $orderCur.style.display = 'none';
+    $orderCur.textContent = '';
+    $tbody.innerHTML = '';
+    $count.textContent = '0';
+    $circle.classList.remove('done');
+    $pill.className = 'status-pill pill-pending';
+    $pill.textContent = 'Ready';
+    completedStages = new Set();
+    document.querySelectorAll('#m5Stages .stage-chip').forEach(function (c) {
+      c.classList.remove('active','completed','errored');
+    });
+  }
 
-                successMsg.textContent = 'PDF downloaded successfully!';
-                successMsg.style.display = 'block';
+  /* --- Load saved base folder on page load --- */
+  fetch('/polaroid/base-folder')
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+          if (d.folder) {
+        $base.value = d.folder;
+        loadShipFolders();
+      }
+    })
+    .catch(function () {});
 
-            } catch (err) {
-                showError(err.message);
-                progressWrap.style.display = 'none';
-            } finally {
-                submitBtn.disabled = false;
+  /* --- Save base folder --- */
+  $saveBase.addEventListener('click', function () {
+    var folder = $base.value.trim();
+    if (!folder) return;
+    $saveBase.disabled = true;
+    fetch('/polaroid/base-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder: folder })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) { alert(d.error); return; }
+      $base.value = d.folder;
+      loadShipFolders();
+    })
+    .catch(function (e) { alert('Failed: ' + e.message); })
+    .finally(function () { $saveBase.disabled = false; });
+  });
+/* — WhatsApp Import — */
+var $waBtn       = document.getElementById('m5WaBtn');
+var $waModal     = document.getElementById('m5WaModal');
+var $waDest      = document.getElementById('m5WaDest');
+var $waZip       = document.getElementById('m5WaZip');
+var $waGoBtn     = document.getElementById('m5WaGoBtn');
+var $waResult    = document.getElementById('m5WaResult');
+
+$waBtn.addEventListener('click', function () {
+    var vis = $waModal.style.display === 'none';
+    $waModal.style.display = vis ? 'block' : 'none';
+    if (vis && $base.value.trim()) {
+        $waDest.value = $base.value.trim();
+    }
+});
+
+$waGoBtn.addEventListener('click', function () {
+    var dest = $waDest.value.trim();
+    var file = $waZip.files[0];
+    if (!dest) { alert('Set destination folder'); return; }
+    if (!file) { alert('Select a WhatsApp chat ZIP'); return; }
+
+    $waGoBtn.disabled = true;
+    $waGoBtn.textContent = 'Importing...';
+    $waResult.style.display = 'none';
+
+    var fd = new FormData();
+    fd.append('dest_folder', dest);
+    fd.append('zip', file);
+
+    fetch('/polaroid/wa-import', { method: 'POST', body: fd })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+        if (d.error) {
+            $waResult.style.display = 'block';
+            $waResult.style.color = '#f87171';
+            $waResult.textContent = 'Error: ' + d.error;
+            return;
+        }
+        $waResult.style.display = 'block';
+        $waResult.style.color = '#4ade80';
+        var lines = d.orders.map(function (o) {
+            return o.order + ' (' + o.files + ' files)';
+        });
+        $waResult.innerHTML = '<strong>' + d.total + ' orders imported:</strong><br>' +
+            lines.join('<br>');
+        
+        // Refresh ship folders if base matches
+        if ($base.value.trim()) loadShipFolders();
+    })
+    .catch(function (e) {
+        $waResult.style.display = 'block';
+        $waResult.style.color = '#f87171';
+        $waResult.textContent = 'Request failed: ' + e.message;
+    })
+    .finally(function () {
+        $waGoBtn.disabled = false;
+        $waGoBtn.textContent = '\u{1F4E5} Import';
+    });
+});
+  /* --- Load ship folders --- */
+  function loadShipFolders() {
+    $ship.disabled = true;
+    $ship.innerHTML = '<option value="">Loading...</option>';
+    $refresh.disabled = true;
+    $runBtn.disabled = true;
+
+    fetch('/polaroid/ship-folders')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) {
+          $ship.innerHTML = '<option value="">Error: ' + escH5(d.error) + '</option>';
+          return;
+        }
+        if (!d.folders.length) {
+          $ship.innerHTML = '<option value="">No ship folders found</option>';
+          return;
+        }
+        var opts = '<option value="">-- Select ship folder --</option>';
+        d.folders.forEach(function (f) {
+          opts += '<option value="' + escH5(f.path) + '">' +
+                  escH5(f.name) + ' (' + f.order_count + ' orders)</option>';
+        });
+        $ship.innerHTML = opts;
+        $ship.disabled = false;
+        $refresh.disabled = false;
+      })
+      .catch(function () {
+        $ship.innerHTML = '<option value="">Failed to load</option>';
+      });
+  }
+
+  $refresh.addEventListener('click', function () { loadShipFolders(); });
+
+  $ship.addEventListener('change', function () {
+    $runBtn.disabled = !this.value;
+    $extractBtn.disabled = !this.value;
+  });
+
+  /* --- Start bulk processing --- */
+  $runBtn.addEventListener('click', function () {
+    var shipFolder = $ship.value;
+    if (!shipFolder) return;
+
+    resetM5();
+    $runBtn.disabled = true;
+    $ship.disabled = true;
+    $refresh.disabled = true;
+    $pill.className = 'status-pill pill-running';
+        $pill.innerHTML = '&#9679; Running';
+    $progress.classList.add('visible');
+
+    fetch('/polaroid/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.error) {
+        alert(data.error);
+        resetM5();
+        $runBtn.disabled = false;
+        $ship.disabled = false;
+        $refresh.disabled = false;
+        return;
+      }
+      subscribeM5(data.task_id);
+    })
+    .catch(function (err) {
+      alert('Request failed: ' + err.message);
+      $runBtn.disabled = false;
+      $ship.disabled = false;
+      $refresh.disabled = false;
+    });
+  });
+
+  function subscribeM5(taskId) {
+    var es = new EventSource('/polaroid/progress/' + encodeURIComponent(taskId));
+
+    es.onmessage = function (ev) {
+      var d = JSON.parse(ev.data);
+
+      if (d.error) {
+        es.close();
+        $bar.style.width = '100%';
+        $bar.classList.add('error');
+        $pct.textContent = 'Error';
+        $dot.classList.add('error');
+        $stage.textContent = 'Failed';
+        $detail.textContent = d.error;
+        $eta.textContent = '';
+        setChip(d.stage || 'error', 'errored');
+        $pill.className = 'status-pill';
+        $pill.style.background = 'rgba(239,68,68,0.15)';
+        $pill.style.color = '#f87171';
+        $pill.textContent = 'Error';
+        enableControls();
+        return;
+      }
+
+      var pct = Math.min(d.pct, 100);
+      $bar.style.width = pct + '%';
+      $pct.textContent = pct + '%';
+      $stage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+      $detail.textContent = d.detail || '';
+
+      if (d.order_name) {
+        $orderCur.style.display = 'block';
+        $orderCur.textContent = '📁 ' + d.order_name +
+          (d.order_total ? ' (' + (d.order_index + 1) + '/' + d.order_total + ')' : '');
+      }
+
+      markPrior(d.stage);
+      if (!d.done) setChip(d.stage, 'active');
+
+// — Preview event: show overlay —
+if (d.stage === 'preview' && d.preview) {
+    window._pvCurrentTaskId = taskId;
+    window._pvShowPreview(d.preview, taskId);
+}
+
+// — Hide preview overlay when pipeline finishes or moves past preview —
+if (d.done || (d.stage === 'done')) {
+    window._pvHideOverlay && window._pvHideOverlay();
+}
+
+
+      if (d.done) {
+        es.close();
+        completedStages.add(d.stage);
+        M5_STAGES.forEach(function (s) { setChip(s, 'completed'); });
+        $bar.classList.add('done');
+        $dot.classList.add('done');
+        $circle.classList.add('done');
+        $pill.className = 'status-pill pill-done';
+        $pill.innerHTML = '&#10003; Done';
+        $orderCur.style.display = 'none';
+              if (d.result) {
+        var r = d.result;
+        document.getElementById('m5SumProcessed').textContent = r.processed;
+        document.getElementById('m5SumSkipped').textContent = r.skipped;
+        document.getElementById('m5SumPdfs').textContent = r.total_pdfs;
+        document.getElementById('m5SumTime').textContent = r.elapsed + 's';
+        document.getElementById('m5SumOutput').textContent = r.output_folder;
+        $summary.classList.add('visible');
+
+        if (r.orders && r.orders.length) {
+          $count.textContent = r.orders.length;
+          $tbody.innerHTML = r.orders.map(function (o, i) {
+            var statusTag = o.status === 'done'
+              ? '<span class="tag" style="background:rgba(34,197,94,.15);color:#4ade80;">Done</span>'
+              : o.status === 'skipped'
+                ? '<span class="tag" style="background:rgba(234,179,8,.15);color:#fbbf24;">Skipped</span>'
+                : '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + escH5(o.status) + '</span>';
+            return '<tr>' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td><span class="code-name">' + escH5(o.folder) + '</span></td>' +
+              '<td><span class="tag tag-id">' + escH5(o.order_id) + '</span></td>' +
+              '<td><span class="tag tag-variant">' + escH5(o.variant) + '</span></td>' +
+              '<td>' + o.photos + '</td>' +
+              '<td>' + o.pdfs + '</td>' +
+              '<td>' + statusTag + '</td>' +
+              '</tr>';
+          }).join('');
+          $table.classList.add('visible');
+        }
+      }
+      enableControls();
+    }
+  };
+
+  es.onerror = function () {
+    es.close();
+    $stage.textContent = 'Connection lost';
+    $dot.classList.add('error');
+    enableControls();
+  };
+}
+
+function enableControls() {
+    $runBtn.disabled = !$ship.value;
+    $extractBtn.disabled = !$ship.value;
+    $ship.disabled = false;
+    $refresh.disabled = false;
+}
+
+// --- Extract Image ----------------------------------------------------
+var EXT_STAGES = ['scan','extract','ocr','report','done'];
+var $extProgress  = document.getElementById('m5ExtProgress');
+var $extBar       = document.getElementById('m5ExtBar');
+var $extPct       = document.getElementById('m5ExtPct');
+var $extDot       = document.getElementById('m5ExtDot');
+var $extStage     = document.getElementById('m5ExtStageLabel');
+var $extEta       = document.getElementById('m5ExtEta');
+var $extDetail    = document.getElementById('m5ExtDetail');
+var $extOrderCur  = document.getElementById('m5ExtOrderCurrent');
+var $extSummary   = document.getElementById('m5ExtSummary');
+var $extTable     = document.getElementById('m5ExtTable');
+var $extTbody     = document.getElementById('m5ExtTbody');
+var $extCount     = document.getElementById('m5ExtCount');
+var extCompletedStages = new Set();
+
+function setExtChip(name, state) {
+    document.querySelectorAll('#m5ExtStages .stage-chip').forEach(function (c) {
+        if (c.dataset.stage === name) {
+            c.classList.remove('active','completed','errored');
+            c.classList.add(state);
+        }
+    });
+}
+
+function markExtPrior(cur) {
+    var idx = EXT_STAGES.indexOf(cur);
+    for (var i = 0; i < idx; i++) {
+        if (!extCompletedStages.has(EXT_STAGES[i])) {
+            extCompletedStages.add(EXT_STAGES[i]);
+            setExtChip(EXT_STAGES[i], 'completed');
+        }
+    }
+}
+
+function resetExtract() {
+    $extProgress.classList.remove('visible');
+    $extSummary.classList.remove('visible');
+    $extTable.classList.remove('visible');
+    $extBar.style.width = '0%';
+    $extBar.classList.remove('done','error');
+    $extPct.textContent = '0%';
+    $extDot.classList.remove('done','error');
+    $extStage.textContent = 'Starting...';
+    $extEta.textContent = '';
+    $extDetail.textContent = '';
+    $extOrderCur.style.display = 'none';
+    $extOrderCur.textContent = '';
+    $extTbody.innerHTML = '';
+    $extCount.textContent = '0';
+    extCompletedStages = new Set();
+    document.querySelectorAll('#m5ExtStages .stage-chip').forEach(function (c) {
+        c.classList.remove('active','completed','errored');
+    });
+}
+
+$extractBtn.addEventListener('click', function () {
+    var shipFolder = $ship.value;
+    if (!shipFolder) return;
+
+    resetExtract();
+    $extractBtn.disabled = true;
+        $runBtn.disabled = true;
+    $ship.disabled = true;
+    $refresh.disabled = true;
+    $pill.className = 'status-pill pill-running';
+    $pill.innerHTML = '&#9679; Extracting';
+    $extProgress.classList.add('visible');
+
+    fetch('/polaroid/extract-start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+        if (data.error) {
+            alert(data.error);
+            resetExtract();
+            enableControls();
+            return;
+        }
+        subscribeExtract(data.task_id);
+    })
+    .catch(function (err) {
+        alert('Request failed: ' + err.message);
+        enableControls();
+    });
+});
+
+function subscribeExtract(taskId) {
+    var es = new EventSource('/polaroid/extract-progress/' + encodeURIComponent(taskId));
+
+    es.onmessage = function (ev) {
+        var d = JSON.parse(ev.data);
+
+        if (d.error) {
+            es.close();
+            $extBar.style.width = '100%';
+            $extBar.classList.add('error');
+            $extPct.textContent = 'Error';
+            $extDot.classList.add('error');
+            $extStage.textContent = 'Failed';
+            $extDetail.textContent = d.error;
+            $extEta.textContent = '';
+            setExtChip(d.stage || 'error', 'errored');
+            $pill.className = 'status-pill';
+            $pill.style.background = 'rgba(239,68,68,0.15)';
+            $pill.style.color = '#f87171';
+            $pill.textContent = 'Error';
+            window._pvHideOverlay && window._pvHideOverlay();
+            enableControls();
+            return;
+        }
+
+        var pct = Math.min(d.pct, 100);
+        $extBar.style.width = pct + '%';
+        $extPct.textContent = pct + '%';
+        $extStage.textContent = d.stage.charAt(0).toUpperCase() + d.stage.slice(1);
+        $extDetail.textContent = d.detail || '';
+
+        if (d.order_name) {
+            $extOrderCur.style.display = 'block';
+            $extOrderCur.textContent = '📁 ' + d.order_name +
+                (d.order_total ? ' (' + (d.order_index + 1) + '/' + d.order_total + ')' : '');
+        }
+
+        markExtPrior(d.stage);
+        if (!d.done) setExtChip(d.stage, 'active');
+
+                if (d.done) {
+            es.close();
+            extCompletedStages.add(d.stage);
+            EXT_STAGES.forEach(function (s) { setExtChip(s, 'completed'); });
+            $extBar.classList.add('done');
+            $extDot.classList.add('done');
+            $pill.className = 'status-pill pill-done';
+            $pill.innerHTML = '&#10003; Done';
+            $extOrderCur.style.display = 'none';
+
+            if (d.result) {
+                var r = d.result;
+                document.getElementById('m5ExtSumOrders').textContent = r.total_orders;
+                document.getElementById('m5ExtSumImages').textContent = r.total_images;
+                document.getElementById('m5ExtSumZips').textContent = r.zips_extracted;
+                document.getElementById('m5ExtSumDeleted').textContent = r.files_deleted;
+                document.getElementById('m5ExtSumOcr').textContent = r.ocr_removed;
+                document.getElementById('m5ExtSumTime').textContent = r.elapsed + 's';
+                document.getElementById('m5ExtSumReport').textContent = r.report_path;
+                $extSummary.classList.add('visible');
+
+                if (r.orders && r.orders.length) {
+                    $extCount.textContent = r.orders.length;
+                    $extTbody.innerHTML = r.orders.map(function (o, i) {
+                        var zipTag = o.extracted_zip
+                            ? '<span class="tag" style="background:rgba(34,197,94,.15);color:#4ade80;">Yes</span>'
+                            : '<span class="tag" style="background:rgba(255,255,255,.05);color:#666;">No</span>';
+                        var ocrCount = o.ocr_removed ? o.ocr_removed.length : 0;
+                        var ocrTag = ocrCount > 0
+                            ? '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + ocrCount + ' removed</span>'
+                            : '<span class="tag" style="background:rgba(255,255,255,.05);color:#666;">0</span>';
+                        return '<tr>' +
+                            '<td>' + (i + 1) + '</td>' +
+                            '<td><span class="code-name">' + escHS(o.folder) + '</span></td>' +
+                            '<td><span class="tag tag-id">' + escHS(o.order_id) + '</span></td>' +
+                            '<td>' + o.final_count + '</td>' +
+                            '<td>' + zipTag + '</td>' +
+                            '<td>' + ocrTag + '</td>' +
+                            '</tr>';
+                    }).join('');
+                    $extTable.classList.add('visible');
+                }
+            }
+            enableControls();
+        }
+    };
+
+    es.onerror = function () {
+        es.close();
+        $extStage.textContent = 'Connection lost';
+        $extDot.classList.add('error');
+        enableControls();
+    };
+}
+
+// --- Order Search ----------------------------------------------------
+var $searchBtn       = document.getElementById('m5SearchBtn');
+var $searchId        = document.getElementById('m5SearchId');
+var $searchSummary   = document.getElementById('m5SearchSummary');
+var $searchTable     = document.getElementById('m5SearchTable');
+var $searchTbody     = document.getElementById('m5SearchTbody');
+var $searchCount     = document.getElementById('m5SearchCount');
+var $searchStatus    = document.getElementById('m5SearchStatus');
+var $searchStatusTx  = document.getElementById('m5SearchStatusText');
+
+$searchBtn.addEventListener('click', function () {
+  var oid = $searchId.value.trim();
+  if (!/^\d{4}$/.test(oid)) {
+    $searchStatusTx.textContent = 'Enter a valid 4-digit order ID.';
+    $searchStatusTx.style.color = '#f87171';
+    $searchStatus.style.display = 'block';
+    return;
+  }
+
+  $searchBtn.disabled = true;
+  $searchStatus.style.display = 'block';
+  $searchStatusTx.style.color = '#60a5fa';
+  $searchStatusTx.textContent = 'Searching...';
+  $searchSummary.style.display = 'none';
+  $searchTable.style.display = 'none';
+
+      fetch('/polaroid/order-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: oid })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      $searchBtn.disabled = false;
+      if (data.error) {
+        $searchStatusTx.style.color = '#f87171';
+        $searchStatusTx.textContent = data.error;
+        return;
+      }
+      $searchStatus.style.display = 'none';
+
+      var s = data.summary;
+      document.getElementById('m5SearchOid').textContent = data.order_id;
+      document.getElementById('m5SearchTotal').textContent = s.total;
+      document.getElementById('m5SearchInput').textContent = s.input_folders;
+      document.getElementById('m5SearchOutput').textContent = s.output_pdfs;
+      document.getElementById('m5SearchTitle').innerHTML = s.total > 0
+        ? '&#128269; Found Order ' + escH5(data.order_id)
+        : '&#10060; Order ' + escH5(data.order_id) + ' not found';
+      $searchSummary.style.display = 'block';
+
+      if (data.results.length) {
+        $searchCount.textContent = data.results.length;
+        $searchTbody.innerHTML = data.results.map(function (r, i) {
+          var typeTag = r.type === 'input'
+            ? '<span class="tag" style="background:rgba(96,165,250,.15);color:#60a5fa;">Input</span>'
+            : '<span class="tag" style="background:rgba(52,211,153,.15);color:#34d399;">Output</span>';
+          return '<tr>' +
+            '<td>' + (i + 1) + '</td>' +
+            '<td><span class="code-name">' + escH5(r.ship_folder) + '</span></td>' +
+            '<td>' + typeTag + '</td>' +
+            '<td>' + escH5(r.name) + '</td>' +
+            '<td><span class="tag tag-variant">' + escH5(r.variant) + '</span></td>' +
+            '<td>' + (r.photos != null ? r.photos : '-') + '</td>' +
+            '</tr>';
+        }).join('');
+        $searchTable.style.display = 'block';
+      }
+    })
+    .catch(function (err) {
+      $searchBtn.disabled = false;
+      $searchStatusTx.style.color = '#f87171';
+      $searchStatusTx.textContent = 'Request failed: ' + err.message;
+    });
+});
+
+$searchId.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { e.preventDefault(); $searchBtn.click(); }
+});
+})();
+</script>
+
+<!-- ========================== PREVIEW OVERLAY JS ========================== -->
+<script>
+(function () {
+  var $overlay   = document.getElementById('previewOverlay');
+  var $sheet     = document.getElementById('pvSheet');
+  var $orderName = document.getElementById('pvOrderName');
+  var $pdfLabel  = document.getElementById('pvPdfLabel');
+  var $saveBtn   = document.getElementById('pvSaveBtn');
+  var $resetBtn  = document.getElementById('pvResetBtn');
+  var $hint      = document.getElementById('pvHint');
+  var $loader    = document.getElementById('pvLoader');
+  var $loaderText = document.getElementById('pvLoaderText');
+
+  // State for current preview
+  var _cells = [];        // [{el, imgEl, overflowX, overflowY, offX, offY, index}]
+  var _taskId = null;
+  var _layoutInfo = null;
+  var SCALE = 1;          // px-per-inch scale for on-screen rendering
+  var _rotatedView = false; // true when sheet is shown in landscape
+
+  /**
+   * Hide the preview overlay and clean up.
+   */
+  window._pvHideOverlay = function () {
+    $loader.style.display = 'none';
+    $overlay.style.display = 'none';
+    $sheet.innerHTML = '';
+    $sheet.style.opacity = '1';
+    $sheet.style.transform = 'none';
+    $sheet.style.margin = '0';
+    _cells = [];
+    _activeCell = null;
+  };
+
+  /**
+   * Show the preview overlay.
+   * @param {object} pv - preview data from SSE event
+   * @param {string} taskId - current task id
+   */
+  window._pvShowPreview = function (pv, taskId) {
+    _taskId = taskId;
+    _layoutInfo = pv;
+    _cells = [];
+    _activeCell = null;
+
+    // Hide loader from previous order (if still showing)
+    $loader.style.display = 'none';
+    $sheet.style.opacity = '1';
+    $saveBtn.disabled = false;
+    $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+    $resetBtn.disabled = false;
+
+    $orderName.textContent = pv.label;
+    $pdfLabel.textContent  = 'PDF ' + (pv.pdf_index + 1) + '/' + pv.pdf_total +
+                             ' · ' + pv.variant.toUpperCase();
+
+    // Calculate scale: fit the 13x19 sheet into the viewport
+    // Try both portrait and landscape orientation, pick whichever is bigger
+    var vw = window.innerWidth - 32;
+    var vh = window.innerHeight - 100;
+    var pageW = pv.page_w;
+    var pageH = pv.page_h;
+    var scalePortrait  = Math.min(vw / pageW, vh / pageH);
+    var scaleLandscape = Math.min(vw / pageH, vh / pageW);
+
+    if (scaleLandscape > scalePortrait) {
+      // Landscape view gives a bigger preview
+      SCALE = scaleLandscape;
+      _rotatedView = true;
+    } else {
+      SCALE = scalePortrait;
+      _rotatedView = false;
+    }
+
+    var sheetW = Math.round(pageW * SCALE);
+    
+
+    var sheetH = Math.round(pageH * SCALE);
+    $sheet.style.width = sheetW + 'px';
+    $sheet.style.height = sheetH + 'px';
+    $sheet.innerHTML = '';
+
+    if (_rotatedView) {
+      // Rotate the sheet -90° visually (CW) so it appears landscape
+      $sheet.style.transform = 'rotate(-90deg)';
+      // The rotated element occupies sheetH x sheetW on screen
+      // Adjust the wrapper so it provides correct space
+      $sheet.style.transformOrigin = 'center center';
+      // Use margin to compensate the bounding-box difference
+      var diffW = (sheetH - sheetW) / 2;
+      var diffH = (sheetW - sheetH) / 2;
+      $sheet.style.marginLeft = diffW + 'px';
+      $sheet.style.marginRight = diffW + 'px';
+      $sheet.style.marginTop = diffH + 'px';
+      $sheet.style.marginBottom = diffH + 'px';
+    } else {
+      $sheet.style.transform = 'none';
+      $sheet.style.margin = '0';
+    }
+
+    // Draw cut marks
+    _drawCutMarks(pv, SCALE);
+
+    var labelEl = document.createElement('div');
+    labelEl.className = 'pv-label';
+    labelEl.textContent = pv.label;
+    labelEl.style.bottom = Math.round(pv.grid_bottom * 0.25 * SCALE) + 'px';
+    $sheet.appendChild(labelEl);
+
+    // Create image cells
+    var cols = pv.cols, rows = pv.rows;
+    var cellW = pv.cell_w * SCALE;
+    var cellH = pv.cell_h * SCALE;
+    var photoW = pv.photo_w * SCALE;
+    var photoH = pv.photo_h * SCALE;
+    var gLeft = pv.grid_left * SCALE;
+    var gBottom = pv.grid_bottom * SCALE;
+    var ox = pv.offset_x * SCALE;
+    var oy = pv.offset_y * SCALE;
+
+    // Frame dimensions in pixels (original, before rotation)
+    var fwPx = pv.frame_w_px;
+    var fhPx = pv.frame_h_px;
+
+    for (var i = 0; i < pv.num_images; i++) {
+      var col = i % cols;
+      var rowFromTop = Math.floor(i / cols);
+      var row = (rows - 1) - rowFromTop;
+
+      // Cell position (CSS: top-left origin, PDF uses bottom-left)
+      var cellLeft = gLeft + col * cellW;
+      var cellTop = sheetH - gBottom - (row + 1) * cellH;
+      var photoLeft = cellLeft + ox;
+      var photoTop = cellTop + (cellH - photoH - oy);
+
+      var cellEl = document.createElement('div');
+      cellEl.className = 'pv-cell';
+      cellEl.style.left = Math.round(photoLeft) + 'px';
+      cellEl.style.top = Math.round(photoTop) + 'px';
+      cellEl.style.width = Math.round(photoW) + 'px';
+      cellEl.style.height = Math.round(photoH) + 'px';
+
+      // Index label
+      var idxEl = document.createElement('div');
+      idxEl.className = 'pv-cell-index';
+      idxEl.textContent = (i + 1);
+      cellEl.appendChild(idxEl);
+
+      // Fit/Fill toggle button
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'pv-toggle fill';
+      toggleBtn.textContent = 'Fill';
+      toggleBtn.title = 'Toggle Fit / Fill';
+      cellEl.appendChild(toggleBtn);
+      // Rotate button (90° clockwise per click)
+    var rotateBtn = document.createElement('button');
+    rotateBtn.className = 'pv-rotate';
+    rotateBtn.innerHTML = '\u21BB';
+    rotateBtn.title = 'Rotate 90° clockwise';
+    cellEl.appendChild(rotateBtn);
+
+    // Zoom +/- buttons
+    var zoomWrap = document.createElement('div');
+    zoomWrap.className = 'pv-zoom';
+    var zoomInBtn = document.createElement('button');
+    zoomInBtn.textContent = '+';
+    zoomInBtn.title = 'Zoom in';
+    var zoomOutBtn = document.createElement('button');
+    zoomOutBtn.textContent = '-';
+    zoomOutBtn.title = 'Zoom out';
+    zoomWrap.appendChild(zoomInBtn);
+    zoomWrap.appendChild(zoomOutBtn);
+    cellEl.appendChild(zoomWrap);
+
+      // Image element (oversized, draggable)
+      var imgEl = document.createElement('img');
+      if (pv.images[i]) {
+        imgEl.src = pv.images[i];
+      }
+      cellEl.appendChild(imgEl);
+
+      $sheet.appendChild(cellEl);
+
+      // Overflow info - how much the image extends beyond the frame
+      var ovInfo = pv.overflows[i] || { overflow_x: 0, overflow_y: 0 };
+      var ovX = ovInfo.overflow_x;    // already in thumbnail pixels
+      var ovY = ovInfo.overflow_y;
+
+      // The thumbnail image is already small (max ~200px cell).
+      // We load it at natural size via <img>, then let the browser
+      // scale it to fill the on-screen cell + overflow.
+      // imgEl.onload will set the final display size.
+      var imgDisplayW = Math.round(photoW + ovX * (photoW / Math.max(photoW, 1)));
+      var imgDisplayH = Math.round(photoH + ovY * (photoH / Math.max(photoH, 1)));
+
+      // Wait for image to load, then compute correct display size from
+      // the actual thumbnail dimensions vs the on-screen cell
+      (function (el, cellW_, cellH_, ox_, oy_, idx_) {
+        el.onload = function () {
+          // Thumbnail natural size includes overflow
+          var natW = el.naturalWidth;
+          var natH = el.naturalHeight;
+          // The thumbnail frame (without overflow) is: natW - ovX, natH - ovY
+          var thumbFrameW = natW - ox_;
+          var thumbFrameH = natH - oy_;
+          if (thumbFrameW <= 0) thumbFrameW = natW;
+          if (thumbFrameH <= 0) thumbFrameH = natH;
+          // Scale factor from thumbnail frame to on-screen cell
+          var sx = cellW_ / thumbFrameW;
+          var sy = cellH_ / thumbFrameH;
+          var dw = Math.round(natW * sx);
+          var dh = Math.round(natH * sy);
+          el.style.width = dw + 'px';
+          el.style.height = dh + 'px';
+          var ix = -Math.round((dw - cellW_) / 2);
+          var iy = -Math.round((dh - cellH_) / 2);
+          el.style.left = ix + 'px';
+          el.style.top = iy + 'px';
+          // Update cellData
+          var cd = _cells[idx_];
+          if (cd) {
+            cd.displayW = dw;
+            cd.displayH = dh;
+            cd.fillW = dw;
+            cd.fillH = dh;
+            cd.offX = ix;
+            cd.offY = iy;
+            _syncClone(cd);
+          }
+        };
+      })(imgEl, Math.round(photoW), Math.round(photoH), ovX, ovY, i);
+
+      // Set initial sizes (will be corrected on load)
+      imgEl.style.width = Math.round(photoW) + 'px';
+      imgEl.style.height = Math.round(photoH) + 'px';
+
+      var initX = 0;
+      var initY = 0;
+      imgEl.style.left = '0px';
+      imgEl.style.top = '0px';
+
+      var cellData = {
+        el: cellEl,
+        imgEl: imgEl,
+        toggleBtn: toggleBtn,
+        rotateBtn: rotateBtn,
+        zoomInBtn: zoomInBtn,
+        zoomOutBtn: zoomOutBtn,
+        displayW: Math.round(photoW),
+        displayH: Math.round(photoH),
+        fillW: Math.round(photoW),   // will be set on img load
+        fillH: Math.round(photoH),
+        frameW: Math.round(photoW),
+        frameH: Math.round(photoH),
+        offX: initX,
+                offY: initY,
+        index: i,
+        mode: 'fill',
+        rotation: 0,
+        zoom: 1.0,
+      };
+      _cells.push(cellData);
+
+      // Bright clone: a clipped copy of the image shown at full opacity inside the frame
+      var cloneWrap = document.createElement('div');
+      cloneWrap.className = 'pv-bright-clone';
+      var cloneImg = document.createElement('img');
+      cloneImg.src = imgEl.src;
+      cloneWrap.appendChild(cloneImg);
+      cellEl.appendChild(cloneWrap);
+      cellData.cloneImg = cloneImg;
+      cellData.cloneWrap = cloneWrap;
+
+      // Attach drag handler
+      _attachDrag(cellData);
+
+      // Attach toggle handler
+      (function (cd_, btn_) {
+        btn_.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (cd_.mode === 'fill') {
+            // Switch to FIT
+            cd_.mode = 'fit';
+            btn_.className = 'pv-toggle fit';
+            btn_.textContent = 'Fit';
+            // Fit: scale image so it fits inside the frame (show full image)
+            var natW = cd_.imgEl.naturalWidth || cd_.fillW;
+            var natH = cd_.imgEl.naturalHeight || cd_.fillH;
+            var fitScale = Math.min(cd_.frameW / natW, cd_.frameH / natH);
+            var fw = Math.round(natW * fitScale);
+            var fh = Math.round(natH * fitScale);
+            cd_.displayW = fw;
+            cd_.displayH = fh;
+            cd_.offX = Math.round((cd_.frameW - fw) / 2);
+            cd_.offY = Math.round((cd_.frameH - fh) / 2);
+            cd_.imgEl.style.width = fw + 'px';
+            cd_.imgEl.style.height = fh + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            cd_.el.style.cursor = 'default';
+            // Deactivate overflow view in fit mode
+            cd_.el.classList.remove('pv-active');
+            if (_activeCell === cd_) _activeCell = null;
+            _syncClone(cd_);
+          } else {
+            // Switch to FILL
+            cd_.mode = 'fill';
+            btn_.className = 'pv-toggle fill';
+            btn_.textContent = 'Fill';
+            cd_.displayW = cd_.fillW;
+            cd_.displayH = cd_.fillH;
+            cd_.offX = -Math.round((cd_.fillW - cd_.frameW) / 2);
+            cd_.offY = -Math.round((cd_.fillH - cd_.frameH) / 2);
+            cd_.imgEl.style.width = cd_.fillW + 'px';
+            cd_.imgEl.style.height = cd_.fillH + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            cd_.el.style.cursor = 'grab';
+            _syncClone(cd_);
+          }
+        });
+      })(cellData, toggleBtn);
+      
+      (function (cd_, btn_) {
+        btn_.addEventListener('click', function (e) {
+            e.stopPropagation();
+            cd_.rotation = (cd_.rotation + 90) % 360;
+            var t = 'rotate(' + cd_.rotation + 'deg)';
+            cd_.imgEl.style.transformOrigin = 'center center';
+            cd_.imgEl.style.transform = t;
+            if (cd_.cloneImg) {
+                cd_.cloneImg.style.transformOrigin = 'center center';
+                cd_.cloneImg.style.transform = t;
+            }
+            if (cd_.rotation === 0) {
+                btn_.classList.remove('rotated');
+            } else {
+                btn_.classList.add('rotated');
             }
         });
+    })(cellData, rotateBtn);
 
-        function showError(msg) {
-            errorMsg.textContent = msg;
-            errorMsg.style.display = 'block';
+    // Attach zoom handlers
+    (function (cd_) {
+        function applyZoom() {
+            var natW = cd_.imgEl.naturalWidth || cd_.fillW;
+            var natH = cd_.imgEl.naturalHeight || cd_.fillH;
+      // Base scale = fill (cover frame). Min zoom shows full image (fit).
+var fillScale = Math.max(cd_.frameW / natW, cd_.frameH / natH);
+var fitScale = Math.min(cd_.frameW / natW, cd_.frameH / natH);
+var minZoom = fitScale / fillScale;  // ratio where image fits inside
+cd_.zoom = Math.max(Math.round(minZoom * 100) / 100, cd_.zoom);
+var s = fillScale * cd_.zoom;
+            var dw = Math.round(natW * s);
+            var dh = Math.round(natH * s);
+            cd_.displayW = dw;
+            cd_.displayH = dh;
+            cd_.fillW = dw;
+            cd_.fillH = dh;
+// Centre the image
+cd_.offX = Math.round((cd_.frameW - dw) / 2);
+cd_.offY = Math.round((cd_.frameH - dh) / 2);
+            cd_.imgEl.style.width = dw + 'px';
+            cd_.imgEl.style.height = dh + 'px';
+            cd_.imgEl.style.left = cd_.offX + 'px';
+            cd_.imgEl.style.top = cd_.offY + 'px';
+            // Update mode label based on coverage
+if (dw >= cd_.frameW && dh >= cd_.frameH) {
+    cd_.mode = 'fill';
+    cd_.toggleBtn.className = 'pv-toggle fill';
+    cd_.toggleBtn.textContent = 'Fill';
+    cd_.el.style.cursor = 'grab';
+} else {
+    cd_.mode = 'fit';
+    cd_.toggleBtn.className = 'pv-toggle fit';
+    cd_.toggleBtn.textContent = 'Fit';
+    cd_.el.style.cursor = 'default';
+}
+            _syncClone(cd_);
         }
-    </script>
+        cd_.zoomInBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+  cd_.zoom = Math.min(3.0, Math.round((cd_.zoom + 0.1) * 100) / 100);
+            applyZoom();
+        });
+        cd_.zoomOutBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+ cd_.zoom = Math.round((cd_.zoom - 0.1) * 100) / 100;
+applyZoom();  // applyZoom clamps to minimum
+        });
+    })(cellData);
+      
+    }
+
+    // Add placeholders for empty slots
+    for (var j = pv.num_images; j < cols * rows; j++) {
+      var pc = j % cols;
+      var prft = Math.floor(j / cols);
+      var pr = (rows - 1) - prft;
+      var pcLeft = gLeft + pc * cellW;
+      var pcTop = sheetH - gBottom - (pr + 1) * cellH;
+      var ppLeft = pcLeft + ox;
+      var ppTop = pcTop + (cellH - photoH - oy);
+      var phEl = document.createElement('div');
+      phEl.className = 'pv-cell';
+            phEl.style.left = Math.round(ppLeft) + 'px';
+      phEl.style.top = Math.round(ppTop) + 'px';
+      phEl.style.width = Math.round(photoW) + 'px';
+      phEl.style.height = Math.round(photoH) + 'px';
+      phEl.style.background = '#e6e6e6';
+      phEl.style.cursor = 'default';
+      $sheet.appendChild(phEl);
+    }
+
+    $overlay.style.display = 'flex';
+  };
+
+  // Click on sheet background -> deselect active cell
+  $sheet.addEventListener('click', function (e) {
+    if (e.target === $sheet) _clearActiveCell();
+  });
+
+  // --- Active cell selection ---
+  var _activeCell = null;
+  function _setActiveCell(cd) {
+    if (_activeCell && _activeCell !== cd) {
+      _activeCell.el.classList.remove('pv-active');
+    }
+    if (cd && cd.mode !== 'fit') {
+      cd.el.classList.add('pv-active');
+      _activeCell = cd;
+    } else {
+      _activeCell = null;
+    }
+  }
+
+  function _clearActiveCell() {
+    if (_activeCell) {
+      _activeCell.el.classList.remove('pv-active');
+      _activeCell = null;
+    }
+  }
+
+  function _syncClone(cd) {
+    if (!cd.cloneImg) return;
+    cd.cloneImg.style.width = cd.imgEl.style.width;
+    cd.cloneImg.style.height = cd.imgEl.style.height;
+    cd.cloneImg.style.left = cd.imgEl.style.left;
+    cd.cloneImg.style.top = cd.imgEl.style.top;
+    if (cd.rotation) {
+        cd.cloneImg.style.transformOrigin = 'center center';
+        cd.cloneImg.style.transform = 'rotate(' + cd.rotation + 'deg)';
+    } else {
+        cd.cloneImg.style.transform = '';
+    }
+  }
+
+  function _attachDrag(cd) {
+    var startX, startY, startOffX, startOffY;
+    var dragging = false;
+
+    function onDown(e) {
+      if (cd.mode === 'fit') return; // no drag in fit mode
+      e.preventDefault();
+      _setActiveCell(cd);
+      dragging = true;
+      var pt = e.touches ? e.touches[0] : e;
+      startX = pt.clientX;
+      startY = pt.clientY;
+      startOffX = cd.offX;
+      startOffY = cd.offY;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onUp);
+    }
+
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      var pt = e.touches ? e.touches[0] : e;
+      var screenDx = pt.clientX - startX;
+      var screenDy = pt.clientY - startY;
+
+      // When sheet is rotated -90° (CW), remap screen coords to element space:
+      // Element +X = screen UP, Element +Y = screen RIGHT
+      // So: element_dx = -screenDy, element_dy = screenDx
+      var dx, dy;
+      if (_rotatedView) {
+        dx = -screenDy;
+        dy = screenDx;
+        
+      } else {
+        dx = screenDx;
+        dy = screenDy;
+      }
+      // Clamp: image must cover the frame
+      var maxLeft = 0;
+      var minLeft = cd.frameW - cd.displayW;
+      var maxTop = 0;
+      var minTop = cd.frameH - cd.displayH;
+      cd.offX = Math.max(minLeft, Math.min(maxLeft, startOffX + dx));
+      cd.offY = Math.max(minTop, Math.min(maxTop, startOffY + dy));
+      cd.imgEl.style.left = cd.offX + 'px';
+      cd.imgEl.style.top = cd.offY + 'px';
+      _syncClone(cd);
+    }
+
+    function onUp() {
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    }
+
+    cd.el.addEventListener('mousedown', onDown);
+    cd.el.addEventListener('touchstart', onDown, { passive: false });
+  }
+
+  function _drawCutMarks(pv, scale) {
+    var cols = pv.cols, rows = pv.rows;
+    var cellW = pv.cell_w * scale;
+    var cellH = pv.cell_h * scale;
+    var gLeft = pv.grid_left * scale;
+    var gBottom = pv.grid_bottom * scale;
+    var sheetH = pv.page_h * scale;
+    var markLen = 0.25 * scale;
+    var markThick = 1;
+
+    // Left & right horizontal marks at row boundaries
+    for (var r = 0; r <= rows; r++) {
+      var y = sheetH - gBottom - r * cellH;
+      var lx = gLeft;
+      var rx = gLeft + cols * cellW;
+      _addMark(lx - markLen, y, markLen, markThick, 'h');
+      _addMark(rx, y, markLen, markThick, 'h');
+    }
+    // Top & bottom vertical marks at column boundaries
+    for (var c = 0; c <= cols; c++) {
+      var x = gLeft + c * cellW;
+      var by = sheetH - gBottom;
+      var ty = sheetH - gBottom - rows * cellH;
+      _addMark(x, by, markThick, markLen, 'v');
+      _addMark(x, ty - markLen, markThick, markLen, 'v');
+    }
+  }
+
+  function _addMark(x, y, w, h, dir) {
+    var m = document.createElement('div');
+    m.className = 'pv-cutmark';
+    if (dir === 'h') {
+      m.style.left = Math.round(x) + 'px';
+      m.style.top = Math.round(y - 0.5) + 'px';
+      m.style.width = Math.round(w) + 'px';
+      m.style.height = '1px';
+    } else {
+      m.style.left = Math.round(x - 0.5) + 'px';
+      m.style.top = Math.round(y) + 'px';
+      m.style.width = '1px';
+      m.style.height = Math.round(h) + 'px';
+    }
+    $sheet.appendChild(m);
+  }
+
+  // Reset all images to centre + fill mode
+  $resetBtn.addEventListener('click', function () {
+    _cells.forEach(function (cd) {
+      cd.mode = 'fill';
+      cd.toggleBtn.className = 'pv-toggle fill';
+      
+      cd.toggleBtn.textContent = 'Fill';
+      cd.displayW = cd.fillW;
+      cd.displayH = cd.fillH;
+      cd.imgEl.style.width = cd.fillW + 'px';
+      cd.imgEl.style.height = cd.fillH + 'px';
+      cd.offX = -Math.round((cd.fillW - cd.frameW) / 2);
+      cd.offY = -Math.round((cd.fillH - cd.frameH) / 2);
+      cd.imgEl.style.left = cd.offX + 'px';
+      cd.imgEl.style.top = cd.offY + 'px';
+      cd.el.style.cursor = 'grab';
+      // Reset rotation & zoom
+      cd.rotation = 0;
+      cd.zoom = 1.0;
+      cd.imgEl.style.transform = '';
+      if (cd.rotateBtn) cd.rotateBtn.classList.remove('rotated');
+      _syncClone(cd);
+    });
+  });
+
+  // Save & Continue
+  $saveBtn.addEventListener('click', function () {
+    // Convert pixel offsets back to 0..1 range, include mode
+    var offsets = _cells.map(function (cd) {
+      var rangeX = cd.displayW - cd.frameW;
+      var rangeY = cd.displayH - cd.frameH;
+      var ox = rangeX > 0 ? (-cd.offX / rangeX) : 0.5;
+      var oy = rangeY > 0 ? (-cd.offY / rangeY) : 0.5;
+      ox = Math.max(0, Math.min(1, ox));
+      oy = Math.max(0, Math.min(1, oy));
+      return {
+        x: Math.round(ox * 1000) / 1000,
+        y: Math.round(oy * 1000) / 1000,
+        mode: cd.mode,
+        rotation: cd.rotation || 0,
+        zoom: Math.round(cd.zoom * 100) / 100
+      };
+    });
+
+    $saveBtn.disabled = true;
+    $saveBtn.textContent = 'Saving...';
+    $resetBtn.disabled = true;
+
+    // Show loader over the sheet (don't hide overlay)
+    $sheet.style.opacity = '0.3';
+    $loaderText.textContent = 'Generating PDF & loading next order...';
+    $loader.style.display = 'flex';
+
+    fetch('/polaroid/preview-confirm/' + encodeURIComponent(_taskId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offsets: offsets }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) {
+        alert(d.error);
+        $loader.style.display = 'none';
+        $sheet.style.opacity = '1';
+        $saveBtn.disabled = false;
+        $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+        $resetBtn.disabled = false;
+        return;
+      }
+      // Stay on overlay - loader shows until next preview arrives
+      // or pipeline finishes (handled by SSE done event)
+    })
+    .catch(function (err) {
+      alert('Save failed: ' + err.message);
+      $loader.style.display = 'none';
+      $sheet.style.opacity = '1';
+      $saveBtn.disabled = false;
+      $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
+      $resetBtn.disabled = false;
+    });
+  });
+})();
+
+</script>
+
+<script>
+// --- Module 6: Final Label -------------------------------------------
+(function () {
+  var $baseInput = document.getElementById('m6Base');
+  var $saveBase  = document.getElementById('m6SaveBase');
+  var $files     = document.getElementById('m6Files');
+  var $runBtn    = document.getElementById('m6RunBtn');
+  var $pill      = document.getElementById('m6Pill');
+  var $circle    = document.getElementById('m6Circle');
+  var $status    = document.getElementById('m6Status');
+  var $statusTx  = document.getElementById('m6StatusText');
+  var $summary   = document.getElementById('m6Summary');
+  var $table     = document.getElementById('m6Table');
+  var $tbody     = document.getElementById('m6Tbody');
+  var $count     = document.getElementById('m6Count');
+
+  // Load saved base folder
+  fetch('/final-label/base-folder').then(function (r) { return r.json(); }).then(function (data) {
+    if (data.folder) { $baseInput.value = data.folder; }
+  });
+
+    // Save base folder
+    $saveBase.addEventListener('click', function () {
+      var folder = $baseInput.value.trim();
+      if (!folder) { showStatus('Enter a base folder path.', '#f87171'); return; }
+
+      fetch('/final-label/base-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: folder })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { showStatus(data.error, '#f87171'); return; }
+        $baseInput.value = data.folder;
+        showStatus('Base folder saved.', '#4ade80');
+      });
+    });
+
+    // Enable run button when files selected
+    $files.addEventListener('change', function () {
+      $runBtn.disabled = !$files.files.length;
+    });
+
+    function showStatus(msg, color) {
+      $statusTx.textContent = msg;
+      $statusTx.style.color = color || '#60a5fa';
+      $status.style.display = 'block';
+    }
+
+    function escH6(s) {
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    // Process
+    $runBtn.addEventListener('click', function () {
+      if (!$files.files.length) { showStatus('Please select label PDF files.', '#f87171'); return; }
+
+      $runBtn.disabled = true;
+      $pill.className = 'status-pill pill-running';
+      $pill.innerHTML = '&#9679; Processing';
+      $summary.classList.remove('visible');
+      $table.classList.remove('visible');
+      showStatus('Uploading and processing labels...', '#60a5fa');
+
+      var formData = new FormData();
+      for (var i = 0; i < $files.files.length; i++) {
+        formData.append('pdfs', $files.files[i]);
+        
+      }
+
+      fetch('/final-label/process', {
+        method: 'POST',
+        body: formData
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) {
+          showStatus(data.error, '#f87171');
+          $pill.className = 'status-pill pill-pending';
+          $pill.textContent = 'Ready';
+          $runBtn.disabled = false;
+          return;
+        }
+
+        $status.style.display = 'none';
+        $pill.className = 'status-pill pill-done';
+        $pill.innerHTML = '&#10003; Done';
+        $circle.classList.add('done');
+
+        var s = data.summary;
+        document.getElementById('m6SumFolders').textContent = s.output_folders_processed;
+        document.getElementById('m6SumParsed').textContent = s.total_labels_parsed;
+        document.getElementById('m6SumUnique').textContent = s.unique_label_ids;
+        document.getElementById('m6SumMatched').textContent = s.total_matched;
+        document.getElementById('m6SumCancelled').textContent = s.total_cancelled;
+        document.getElementById('m6SumPdfs').textContent = s.label_pdfs_created;
+        $summary.classList.add('visible');
+
+        if (data.results && data.results.length) {
+          $count.textContent = data.results.length;
+          $tbody.innerHTML = data.results.map(function (r, i) {
+            var cancelledStr = r.cancelled_ids.length
+              ? r.cancelled_ids.map(function (id) {
+                  return '<span class="tag" style="background:rgba(239,68,68,.12);color:#f87171;">' + escH6(id) + '</span>';
+                }).join(' ')
+              : '<span style="color:#4ade80;">None</span>';
+              
+            return '<tr>' +
+              '<td>' + (i + 1) + '</td>' +
+              '<td><span class="code-name">' + escH6(r.folder) + '</span></td>' +
+              '<td>' + r.total_orders + '</td>' +
+              '<td><span style="color:#4ade80;font-weight:600;">' + r.matched + '</span></td>' +
+              '<td><span style="color:' + (r.cancelled > 0 ? '#f87171' : '#4ade80') + ';font-weight:600;">' + r.cancelled + '</span></td>' +
+              '<td>' + (r.label_pdf ? escH6(r.label_pdf) : '-') + '</td>' +
+              '</tr>';
+          }).join('');
+          $table.classList.add('visible');
+        }
+
+        $runBtn.disabled = false;
+      })
+      .catch(function (err) {
+        showStatus('Request failed: ' + err.message, '#f87171');
+        $pill.className = 'status-pill pill-pending';
+        $pill.textContent = 'Ready';
+        $runBtn.disabled = false;
+      });
+    });
+})();
+</script>
+
 </body>
 </html>
-
-            
+                
