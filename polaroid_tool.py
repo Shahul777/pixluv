@@ -36,7 +36,7 @@ _preview_tmp_dirs: dict[str, str] = {}  # task_id -> temp dir pa
 SETTING_BASE_FOLDER = "polaroid_base_folder"
 _pdf_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf-gen")
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
-_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23]|4x6)\s*$", re.IGNORECASE)
+_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23]|4x[46]|5x7|magnet)\s*$", re.IGNORECASE)
 
 # Ship-folder pattern: contains "ship" and "image" (flexible date formats)
 _SHIP_FOLDER_RE = re.compile(r"ship.*image", re.IGNORECASE)
@@ -53,13 +53,19 @@ _VARIANT_TO_LAYOUT = {
     "3x2": "3x2_polaroid_36",
     "3x3": "3x3_square_24",
     "4x6": "4x6_frame_9",
+    "4x4": "4x4_square_12",
+    "5x7": "5x7_frame_4",
+    "magnet": "magnet_18",
 }
 
 _UPS = {
     "4x3": 18,
     "3x2": 36,
     "3x3": 24,
-    "4x6":9,
+    "4x6": 9,
+    "4x4": 12,
+    "5x7": 4,
+    "magnet": 18,
 }
 def _new_q(task_id: str) -> queue.Queue:
     q: queue.Queue = queue.Queue()

@@ -1963,16 +1963,16 @@ def _wa_open_group(page, group_name: str) -> bool:
             "#pane-side div[role='row'], "
             "#pane-side div[data-testid='cell-frame-container']"
         )
-        if first_chat.count() > 0:
-            first_chat.first.click()
+        if first_chat.count() > 1:
+            first_chat.nth(1).click()
             time.sleep(2)
             log.info("Opened first chat in list (assumed group: %s)", group_name)
             return True
 
         # Fallback: try clicking first span with a title in the chat list
         chat_title = page.locator("#pane-side span[title]")
-        if chat_title.count() > 0:
-            chat_title.first.click()
+        if chat_title.count() > 1:
+            chat_title.nth(1).click()
             time.sleep(2)
             log.info("Opened first chat title in list")
             return True

@@ -92,6 +92,36 @@ LAYOUTS = {
         "frame_w_px": 1110, "frame_h_px": 1710,
         "rotate": False, "label_y": 0.25,
     },
+    "magnet_18": {
+    "label": "3.75x2.75 Magnet (18 per sheet)",
+    "cols": 3, "rows": 6, "max_images": 18,
+    "cell_w": 3.75, "cell_h": 2.75,
+    "grid_left": 0.875, "grid_bottom": 1.25,
+    "photo_w": 2.92, "photo_h": 2.47,
+    "offset_x": 0.69, "offset_y": 0.14,
+    "frame_w_px": 741, "frame_h_px": 873,
+    "rotate": True, "label_y": 0.25,
+},
+"4x4_square_12": {
+    "label": "4x4 Square (12 per sheet)",
+    "cols": 3, "rows": 4, "max_images": 12,
+    "cell_w": 4.0, "cell_h": 4.0,
+    "grid_left": 0.5, "grid_bottom": 1.5,
+    "photo_w": 3.46, "photo_h": 3.46,
+    "offset_x": 0.27, "offset_y": 0.27,
+    "frame_w_px": 1038, "frame_h_px": 1038,
+    "rotate": False, "label_y": 0.25,
+},
+"5x7_frame_4": {
+    "label": "5x7 Frame (4 per sheet)",
+    "cols": 2, "rows": 2, "max_images": 4,
+    "cell_w": 5.0, "cell_h": 7.0,
+    "grid_left": 1.5, "grid_bottom": 2.5,
+    "photo_w": 4.64, "photo_h": 6.64,
+    "offset_x": 0.18, "offset_y": 0.18,
+    "frame_w_px": 1392, "frame_h_px": 1992,
+    "rotate": False, "label_y": 0.25,
+},
 }
 
 def _apply_exif_orientation(img: Image.Image) -> Image.Image:

@@ -60,8 +60,8 @@ def _emit(q: queue.Queue, *, stage: str, pct: int, detail: str,
     q.put(payload)
 
 
-VARIANT_ORDER = {"4x3": 0, "3x2": 1, "3x3": 2, "4x6": 3}
-VARIANT_RE = re.compile(r"(3x2|3x3|4x6)", re.IGNORECASE)
+VARIANT_ORDER = {"4x3": 0, "3x2": 1, "3x3": 2, "4x4": 3, "4x6": 4,"5x7": 5, "magnet": 6}
+VARIANT_RE = re.compile(r"(3x2|3x3|4x[46]|5x7|magnet)", re.IGNORECASE)
 FOUR_DIGIT_RE = re.compile(r"-(\d{4})")
 COMPLEX_INDICATORS = re.compile(r"[&]|1_2|2_2|\bset\b", re.IGNORECASE)
 
