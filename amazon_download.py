@@ -1664,14 +1664,17 @@ def ad_stop(task_id: str):
         return jsonify({"error": "Task not found."}), 404
         
 WA_BROWSER_DATA_DIR = Path(__file__).parent / ".whatsapp_browser_data"
-SETTING_WA_GROUP = "amazon_download_wa_group"
 
+WA_DOWNLOADS_DIR = Path(__file__).parent / ".wa_downloads"
+SETTING_WA_GROUP = "amazon_download_wa_group"
+SETTING_WA_BASE_FOLDER = "wa_sync_base_folder"
 _wa_playwright = None
 _wa_context = None
 _wa_lock = threading.Lock()
 
 def _ensure_wa_dir():
     WA_BROWSER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    WA_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _close_wa_browser():
     global _wa_playwright, _wa_context
@@ -1703,6 +1706,8 @@ def ad_wa_launch():
             user_data_dir=str(WA_BROWSER_DATA_DIR),
             headless=False,
             viewport={"width": 1300, "height": 850},
+            accept_downloads=True,
+            downloads_path=str(WA_DOWNLOADS_DIR),
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run",
@@ -1756,11 +1761,31 @@ def ad_wa_get_group():
     """Get saved WhatsApp group name."""
     group = get_setting(SETTING_WA_GROUP, "")
     return jsonify({"group_name": group})
+@amazon_bp.route("/amazon-download/wa-base-folder", methods=["GET"])
+def ad_wa_get_base_folder():
+    """Get saved WhatsApp sync base folder."""
+    folder = get_setting(SETTING_WA_BASE_FOLDER, "")
+    return jsonify({"folder": folder})
 
+@amazon_bp.route("/amazon-download/wa-base-folder", methods=["POST"])
+def ad_wa_set_base_folder():
+    """Set the WhatsApp sync base folder."""
+    data = request.get_json(silent=True) or {}
+    folder = (data.get("folder") or "").strip()
+    if not folder:
+        return jsonify({"error": "Folder path is required."}), 400
+    p = Path(folder)
+    if not p.is_dir():
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return jsonify({"error": f"Folder not found and could not create: {folder}"}), 400
+    set_setting(SETTING_WA_BASE_FOLDER, str(p))
+    return jsonify({"status": "ok", "folder": str(p)})
 @amazon_bp.route("/amazon-download/wa-sync", methods=["POST"])
 def ad_wa_sync():
     """Start syncing WhatsApp media to order folders."""
-    base_folder = get_setting(SETTING_BASE_FOLDER, "")
+    base_folder = get_setting(SETTING_WA_BASE_FOLDER, "")
     if not base_folder or not Path(base_folder).is_dir():
         return jsonify({"error": "Base folder not set or not found."}), 400
 
@@ -1825,6 +1850,9 @@ def _run_wa_sync(base_folder_path: str, group_name: str, task_id: str):
                 user_data_dir=str(WA_BROWSER_DATA_DIR),
                 headless=False,
                 viewport={"width": 1300, "height": 850},
+                accept_downloads=True,
+                downloads_path=str(WA_DOWNLOADS_DIR),
+
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-first-run",
@@ -1883,6 +1911,7 @@ def _run_wa_sync(base_folder_path: str, group_name: str, task_id: str):
         _emit(q, stage="scan", pct=10, detail="Scanning messages for order IDs...", done=False)
 
         # Scan messages and build order-media map
+        _wa_scroll_to_load_all(page,q)
         order_media_map = _wa_scan_messages(page, q)
 
         if not order_media_map:
@@ -1898,56 +1927,53 @@ def _run_wa_sync(base_folder_path: str, group_name: str, task_id: str):
         # Match order IDs to folders and download
         _emit(q, stage="download", pct=20, detail="Downloading media to folders...", done=False)
 
-        total_items = sum(len(v) for v in order_media_map.values())
+        total_orders = len(order_media_map)
         downloaded = 0
         not_found = 0
         matched = 0
-        item_idx = 0
+        order_idx = 0
 
         for oid4, media_elements in order_media_map.items():
             if _is_stopped(task_id):
                 _emit(q, stage="stopped", pct=0, detail="Stopped by user.", done=True)
                 return
-
+            order_idx += 1
             # Find matching folder in base location
             target_folder = _find_folder_for_order(base_folder, oid4)
             if not target_folder:
                 log.warning("  No folder found for order ID -%s", oid4)
-                not_found += len(media_elements)
-                item_idx += len(media_elements)
+
+                not_found += 1
+              
                 continue
 
             matched += 1
-            log.info("  Downloading %d files -> %s", len(media_elements), target_folder.name)
+            pct = 20 + int((order_idx / total_orders) * 70)
+            _emit(q, stage="download", pct=pct,
+              detail=f"Downloading order {oid4} ({order_idx}/{total_orders}) -> {target_folder.name}",
+              done=False)
 
-            for media_info in media_elements:
-                if _is_stopped(task_id):
-                    _emit(q, stage="stopped", pct=0, detail="Stopped by user.", done=True)
-                    return
-
-                item_idx += 1
-                pct = 20 + int((item_idx / total_items) * 70)
-                _emit(q, stage="download", pct=pct,
-                      detail=f"Downloading {item_idx}/{total_items} -> {target_folder.name}",
-                      done=False)
-
-                success = _wa_download_media(page, media_info, target_folder)
-                if success:
-                    downloaded += 1
+        # Use "Download all" context menu on the media group
+            success = _wa_download_all_for_order(page, media_elements, target_folder)
+            if success:
+                downloaded += 1
+                log.info("  ✓ Downloaded zip for %s -> %s", oid4, target_folder.name)
+            else:
+                log.warning("  X Failed to download for %s", oid4)
 
         elapsed = round(time.perf_counter() - t0, 1)
         _emit(q, stage="done", pct=100, done=True,
-              detail=f"Done! {downloaded} files downloaded in {elapsed}s",
-              result={
-                  "downloaded": downloaded,
-                  "matched": matched,
-                  "not_found": not_found,
-                  "total_orders": len(order_media_map),
-                  "elapsed": elapsed,
-              })
+          detail=f"Done! {downloaded}/{matched} orders downloaded in {elapsed}s",
+          result={
+              "downloaded": downloaded,
+              "matched": matched,
+              "not_found": not_found,
+              "total_orders": total_orders,
+              "elapsed": elapsed,
+          })
 
         log.info("WA SYNC DONE: %d downloaded, %d orders matched, %d not found [%.1fs]",
-                 downloaded, matched, not_found, elapsed)
+             downloaded, matched, not_found, elapsed)
 
     except Exception as exc:
         log.exception("WhatsApp sync failed")
@@ -1981,30 +2007,61 @@ def _wa_open_group(page, group_name: str) -> bool:
     except Exception as e:
         log.error("Failed to open first chat: %s", e)
         return False
+def _wa_scroll_to_load_all(page, q: queue.Queue):
+    """Scroll the chat upward to load older messages into the DOM.
+    Stops when no new messages appear after scrolling.
+    """
+    _emit(q, stage="scan", pct=8, detail="Scrolling up to load all messages...", done=False)
+
+    # Find the scrollable message container
+    scroll_container = page.locator(
+        "div[data-tab='8'],"
+        "div[role='application']"
+    )
+
+    if scroll_container.count() == 0:
+        # Fallback: try the main chat pane
+        scroll_container = page.locator("div.copyable-area")
+
+    if scroll_container.count() == 0:
+        log.warning("Could not find scroll container")
+        return
+
+    prev_count = 0
+    max_scrolls = 30  # Safety limit
+    for attempt in range(max_scrolls):
+        # Count current messages
+        msg_count = page.locator("div[data-id]").count()
+        if msg_count == prev_count and attempt > 0:
+            # No new messages loaded - we've reached the top
+            log.info("Scroll done: no new messages after %d scrolls (%d messages total)", attempt, msg_count)
+            break
+        prev_count = msg_count
+        
+        scroll_container.first.evaluate("el => el.scrollTop = 0")
+        time.sleep(1.5)
+
+    log.info("Finished scrolling: %d messages in DOM", page.locator("div[data-id]").count())
+
+
 def _wa_scan_messages(page, q: queue.Queue) -> dict:
-    """Scan visible messages in the chat. Returns {order_id_4: [media_info_list]}."""
-    
-    # Reads messages from bottom to top. When a 4-digit text message is found,
-    # all media messages ABOVE it (until the next 4-digit marker) belong to that order.
+    """Scan messages in the chat. Returns {order_id_4: [media_msg_indices]}.
+
+    Reads messages from bottom to top. When a 4-digit text message is found,
+    the media message(s) directly ABOVE it belong to that order.
+    In WhatsApp, grouped photos appear as a single message with multiple images.
+    """
     order_media_map = {}
 
     try:
-        # Get all message elements in the chat
-        # WhatsApp messages are in a scrollable container
-        msg_container = page.locator(
-            "div[data-tab='8'], "
-            "div[role='application'], "
-            "div.copyable-area"
-        )
+        time.sleep(1)
 
-        # Get all individual message rows
-        messages = page.locator(
-            "div.message-in, div.message-out, "
-            "div[data-pre-plain-text], "
-            "div[class*='message']"
-        )
+        # WhatsApp Web wraps each message in a div with data-id attribute
+        messages = page.locator("div[data-id]")
 
-        # Fallback: get messages by role
+        if messages.count() == 0:
+            messages = page.locator("div.message-in, div.message-out")
+            
         if messages.count() == 0:
             messages = page.locator("div[role='row']")
 
@@ -2014,8 +2071,7 @@ def _wa_scan_messages(page, q: queue.Queue) -> dict:
         if msg_count == 0:
             return {}
 
-        # Collect all messages with their type (text/media) and content
-        # Process from bottom (newest) to top (oldest)
+        # Collect messages from bottom (newest) to top (oldest)
         collected = []
         for i in range(msg_count - 1, -1, -1):
             try:
@@ -2023,63 +2079,72 @@ def _wa_scan_messages(page, q: queue.Queue) -> dict:
                 msg_text = ""
                 is_media = False
 
-                # Check if it's a media message (image/video/document)
-                media_el = msg_el.locator(
-                    "img[src*='blob:'], img[src*='media'], "
-                    "div[data-testid='media-url-provider'], "
-                    "a[href*='blob:'], "
-                    "div[data-testid='document-thumb'], "
-                    "span[data-icon='audio-download'], "
-                    "img[data-testid='image-thumb']"
-                )
-
-                if media_el.count() > 0:
-                    is_media = True
-
-                # Also check for downloadable content
-                dl_el = msg_el.locator(
-                    "button[aria-label='Download'], "
-                    "span[data-icon='download'], "
-                    "span[data-icon='audio-download']"
-                )
-                if dl_el.count() > 0:
-                    is_media = True
-                    
                 # Get text content
-                text_el = msg_el.locator(
-                    "span.selectable-text, "
-                    "span[dir='ltr'], "
-                    "span.copyable-text"
-                )
+                try:
+                    full_text = msg_el.inner_text(timeout=2000).strip()
+                except Exception:
+                    full_text = ""
+
+                # Check for media (images/video/document)
+                has_img = msg_el.locator("img").count() > 0
+                has_document = msg_el.locator(
+                    "span[data-icon='doc'], span[data-icon='document'],"
+                    "div[data-testid='document-thumb']"
+                ).count() > 0
+
+                if has_img or has_document:
+                    is_media = True
+
+                # Extract text for order ID detection
+                text_el = msg_el.locator("span.selectable-text")
+
                 if text_el.count() > 0:
-                    msg_text = text_el.first.inner_text().strip()
+                    msg_text = text_el.first.inner_text(timeout=1000).strip()
+                elif not is_media and full_text:
+                    lines = [l.strip() for l in full_text.split("\n") if l.strip()]
+                    for line in lines:
+                        if re.match(r"^\d{4}$", line):
+                            msg_text = line
+                            break
+                    if not msg_text and lines:
+                        msg_text = lines[0]
 
                 collected.append({
                     "index": i,
                     "text": msg_text,
                     "is_media": is_media,
-                    "element_index": i,
                 })
-            except Exception:
+
+                if is_media:
+                    log.info("  MSG[%d]: MEDIA (img=%s doc=%s)", i, has_img, has_document)
+                elif msg_text and re.match(r"^\d{4}$", msg_text):
+                    log.info("  MSG[%d]: ORDER MARKER = '%s'", i, msg_text)
+
+            except Exception as ex:
+                log.warning("  MSG[%d]: error: %s", i, ex)
                 continue
 
-        # Now process: find 4-digit order markers and assign media above them
+        log.info("WA SCAN: %d messages (%d media, %d text)",
+                 len(collected),
+                 sum(1 for m in collected if m["is_media"]),
+                 sum(1 for m in collected if m["text"] and not m["is_media"]))
+
+        # Process: find 4-digit order markers and assign media above them
         current_order_id = None
         current_media = []
 
         for msg in collected:  # bottom to top
             text = msg["text"].strip()
 
-            # Check if this is a 4-digit order ID marker
             if re.match(r"^\d{4}$", text):
                 # Save previous order's media
                 if current_order_id and current_media:
                     order_media_map[current_order_id] = current_media
+
                 current_order_id = text
                 current_media = []
                 log.info("  Found order marker: %s", text)
             elif msg["is_media"] and current_order_id:
-                # This media belongs to the current order (above the marker)
                 current_media.append(msg)
 
         # Save last order's media
@@ -2092,75 +2157,251 @@ def _wa_scan_messages(page, q: queue.Queue) -> dict:
     return order_media_map
 
 
-def _wa_download_media(page, media_info: dict, target_folder: Path) -> bool:
-    """Download a single media item from WhatsApp to the target folder."""
+
+
+def _wa_download_all_for_order(page, media_elements: list, target_folder: Path) -> bool:
+    """Download all media for an order using WhatsApp's 'Download all' context menu.
+
+    Hovers over the media message -> clicks the down-arrow -> clicks 'Download all'.
+    This downloads all grouped images as a zip file.
+    Falls back to individual download if 'Download all' is not available.
+    """
+    target_folder.mkdir(parents=True, exist_ok=True)
+
+    # Use the first (topmost) media message - in WhatsApp, grouped images
+    # are typically in a single message element
+    # media_elements are in bottom-to-top order, so last = topmost
+    first_media = media_elements[-1]  # topmost media message
+
+    # Locate messages
+    messages = page.locator("div[data-id]")
+    if messages.count() == 0:
+        messages = page.locator("div.message-in, div.message-out")
+    if messages.count() == 0:
+        messages = page.locator("div[role='row']")
+
+    idx = first_media["index"]
+    if idx >= messages.count():
+        log.warning("    Media index %d out of range", idx)
+        return False
+
+    msg_el = messages.nth(idx)
+
     try:
-        target_folder.mkdir(parents=True, exist_ok=True)
-        msg_el = page.locator(
-            "div.message-in, div.message-out, "
-            "div[data-pre-plain-text], "
-            "div[class*='message'], "
-            "div[role='row']"
-        ).nth(media_info["element_index"])
+        # Scroll the message into view
+        msg_el.scroll_into_view_if_needed()
+        time.sleep(0.5)
 
-        # Try to click on the media to open it
-        media_clickable = msg_el.locator(
-            "img[src*='blob:'], img[data-testid='image-thumb'], "
-            "div[data-testid='media-url-provider'], "
-            "div[role='button']"
-        )
+        img_el = msg_el.locator("img")
+        if img_el.count() > 0:
+            img_el.first.click()
+            time.sleep(1.5)
 
-        if media_clickable.count() > 0:
-            media_clickable.first.click()
+        # Navigate through all images using Right arrow to load them
+        # Press Right until we loop back or hit the end
+            prev_src = ""
+            max_nav = 200  # Safety limit
+            for nav_i in range(max_nav):
+            # Get current image src to detect when we've looped
+                try:
+                    current_img = page.locator("img[src^='blob:'], img[src^='https://']")
+                    current_src = ""
+                    for ci in range(current_img.count() - 1, -1, -1):
+                        src = current_img.nth(ci).get_attribute("src") or ""
+                        if src.startswith("blob:") or "media" in src:
+                            current_src = src
+                            break
+                except Exception:
+                    current_src = ""
+
+                page.keyboard.press("ArrowRight")
+                time.sleep(0.3)
+
+            # Check if we've looped back to first image (same src as start)
+                if nav_i > 0 and current_src == prev_src:
+                    break
+                if nav_i == 0:
+                    first_src = current_src
+                elif current_src == first_src and nav_i > 2:
+                    break
+                prev_src = current_src
+
+        # Close the lightbox
+            page.keyboard.press("Escape")
+            time.sleep(0.8)
+
+        # Now scroll message back into view (lightbox may have shifted focus)
+            msg_el.scroll_into_view_if_needed()
+            time.sleep(0.5)
+
+      
+        img_el = msg_el.locator("img")
+        if img_el.count() > 0:
+            img_el.first.click(button="right")  
+
+        else:
+            # 
+            msg_el.click(button="right")
+
+        time.sleep(1)
+
+        # Wait for context menu to fully render
+        time.sleep(0.5)
+
+        # Click "Download all" using get_by_text for reliable text matching
+        clicked = False
+
+        # Try exact text match first
+        try:
+            dl_btn = page.get_by_text("Download all", exact=True)
+            if dl_btn.count() > 0:
+                log.info("    Found 'Download all' via get_by_text (%d matches)", dl_btn.count())
+                # Collect downloads triggered by clicking "Download all"
+                
+                dl_btn.first.click()
+                clicked = True
+        except Exception as e:
+            log.warning("    get_by_text('Download all') failed: %s", e)
+
+        # Fallback: try broader selectors
+        if not clicked:
+            try:
+                dl_btn = page.locator("li >> text=Download all")
+                if dl_btn.count() > 0:
+                   
+                    dl_btn.first.click()
+                    clicked = True
+                    log.info("    Found 'Download all' via li>>text selector")
+            except Exception as e:
+                log.warning("    li>>text selector failed: %s", e)
+
+        if not clicked:
+            try:
+                # Last resort: look for any element with "Download" text
+                dl_btn = page.get_by_text("Download", exact=True)
+                if dl_btn.count() > 0:
+                   
+                    dl_btn.first.click()
+                    clicked = True
+                    log.info("    Found 'Download' via get_by_text")
+            except Exception as e:
+                log.warning("    get_by_text('Download') failed: %s", e)
+
+        if not clicked:
+            log.warning("    'Download all' menu item not found/clickable")
+            page.keyboard.press("Escape")
+            time.sleep(0.3)
+            return False
+
+        import shutil
+        import zipfile
+        downloads_folder = WA_DOWNLOADS_DIR
+        log.info("    Monitoring Downloads folder: %s", downloads_folder)
+
+        # Snapshot existing files before download starts
+        before_files = set()
+        if downloads_folder.exists():
+            before_files = {f.name for f in downloads_folder.iterdir() if f.is_file()}
+
+        # Wait for downloads to appear (files take time to save)
+        time.sleep(8)
+
+        # Wait until no new files are being written (max 60s)
+        deadline = time.time() + 60
+        prev_new_count = 0
+        stable_count = 0
+        while time.time() < deadline:
+            current_files = {f.name for f in downloads_folder.iterdir() if f.is_file()}
+            new_files = current_files - before_files
+
+
+
+            if len(new_files) > 0 and len(new_files) == prev_new_count:
+            # Check file sizes are stable (not still writing)
+                sizes_stable = True
+                for fname in new_files:
+                    fpath = downloads_folder / fname
+                    try:
+                        s1 = fpath.stat().st_size
+                        time.sleep(0.5)
+                        s2 = fpath.stat().st_size
+                        if s1 != s2 or s1 == 0:
+                            sizes_stable = False
+                            break
+                    except Exception:
+                        sizes_stable = False
+                        break
+                if sizes_stable:
+                    stable_count += 1
+                    if stable_count >= 2:  # Stable for 2 checks - download done
+                        break
+                else:
+                    stable_count = 0
+            else:
+                stable_count = 0
+            prev_new_count = len(new_files)
             time.sleep(1)
 
-            # Look for download button in the lightbox/overlay
-            dl_btn = page.locator(
-                "span[data-icon='download'], "
-                "button[aria-label='Download'], "
-                "div[aria-label='Download']"
-            )
+    # Collect ALL new files (WhatsApp uses UUID names with no extension)
+        current_files = {f.name for f in downloads_folder.iterdir() if f.is_file()}
+        new_files_list = list(current_files - before_files)
 
-            if dl_btn.count() > 0:
-                with page.expect_download(timeout=30000) as download_info:
-                    dl_btn.first.click()
+        if not new_files_list:
+            log.warning("    No new files found in WA downloads folder")
+            return False
 
-                download = download_info.value
-                filename = download.suggested_filename or f"media_{int(time.time()*1000)}"
-                download.save_as(str(target_folder / filename))
-                log.info("      Downloaded: %s", filename)
+        log.info("    Found %d new file(s) in downloads: %s", len(new_files_list), new_files_list)
 
-                # Close the overlay
-                close_btn = page.locator(
-                    "span[data-icon='x'], button[aria-label='Close']"
-                )
-                if close_btn.count() > 0:
-                    close_btn.first.click()
-                    time.sleep(0.5)
+    # Process each new file - it's likely a ZIP (WhatsApp "Download all" creates a zip)
+        extracted = 0
+        for fname in new_files_list:
+            src = downloads_folder / fname
+            try:
+            # Try to extract as ZIP first
+                if zipfile.is_zipfile(str(src)):
+                    log.info("    Extracting ZIP: %s", fname)
+                    with zipfile.ZipFile(str(src), 'r') as zf:
+                        zf.extractall(str(target_folder))
+                        extracted += len(zf.namelist())
+                # Remove the zip after extraction
+                    src.unlink()
+                    log.info("    Extracted %d files from ZIP -> %s", extracted, target_folder.name)
+                else:
+                # Not a zip - move as-is (might be a single image)
+                # Try to detect file type and add extension
+                    ext = ""
+                    with open(str(src), 'rb') as f:
+                        header = f.read(8)
+                    if header[:4] == b'\x89PNG':
+                        ext = ".png"
+                    elif header[:2] == b'\xff\xd8':
+                        ext = ".jpg"
+                    elif header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+                        ext = ".webp"
+                    elif header[:4] == b'\x00\x00\x00\x1c' or header[:4] == b'\x00\x00\x00\x20':
+                        ext = ".mp4"
 
-                return True
+                    dst_name = fname + ext if ext else fname
+                    dst = target_folder / dst_name
+                    shutil.move(str(src), str(dst))
+                    extracted += 1
+                    log.info("    Moved file: %s -> %s", fname, dst_name)
+            except Exception as me:
+                log.warning("    Failed to process %s: %s", fname, me)
 
-        # Fallback: try direct download button on message
-        dl_btn = msg_el.locator(
-            "button[aria-label='Download'], "
-            "span[data-icon='download']"
-        )
-        if dl_btn.count() > 0:
-            with page.expect_download(timeout=30000) as download_info:
-                dl_btn.first.click()
+        log.info("    Total %d files extracted/moved -> %s", extracted, target_folder.name)
+        time.sleep(1)
+        return extracted > 0
+          
 
-            download = download_info.value
-            filename = download.suggested_filename or f"media_{int(time.time()*1000)}"
-            download.save_as(str(target_folder / filename))
-            log.info("      Downloaded: %s", filename)
-            return True
-
-        return False
     except Exception as e:
-        log.warning("      Download failed: %s", e)
+        log.warning("    Download all failed for index %d: %s", idx, e)
+        # Make sure any open menu is closed
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
         return False
-
-
 def _find_folder_for_order(base_folder: Path, order_id_4: str) -> Path | None:
     """Find the folder in base_folder that matches the given 4-digit order ID."""
     tag = f"-{order_id_4}"
