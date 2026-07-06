@@ -360,6 +360,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
     <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button>
     <button class="tab-btn" data-tab="tab-amz">&#128230;Amazon Download</button>
+    <button class="tab-btn" data-tab="tab-fk-orders">&#128230;Flipkart Orders</button>
 </div>
 </nav>
 
@@ -872,6 +873,77 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 
 
 </div>
+
+
+
+
+<!-- ===================== Flipkart Order Processing ===================== -->
+<div class="tab-panel" id="tab-fk-orders">
+  <div class="module-card" id="fkOrdersCard">
+    <div class="module-header">
+      <div class="step-circle" style="background: rgba(255,153,0,0.15); color: #f90;">&#128230;</div>
+      <span class="module-title">
+        Flipkart Order Processing
+        <span class="status-pill pill-pending" id="fkoPill">Ready</span>
+      </span>
+    </div>
+    <p class="module-desc">
+      Upload the <strong>Order CSV</strong> downloaded from Flipkart Seller Hub 
+      (To Pack -> Other Actions -> Download Order List). Creates order folders 
+      named <em>BuyerName-XXXX</em> and tracks processed orders in <code>FlipkartReport.txt</code>.
+    </p>
+
+    <!-- Base folder -->
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="fkoBase">Base Folder (order images folder)</label>
+        <input type="text" class="form-input" id="fkoBase" placeholder="C:\Users\you\Desktop\flipkart-orders">
+      </div>
+      <div>
+        <button id="fkoSaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
+      </div>
+    </div>
+
+    <!-- CSV upload + Process -->
+    <div class="form-row" style="margin-bottom:14px;">
+      <div class="form-group">
+        <label for="fkoCsv">Order CSV File</label>
+        <input type="file" class="form-input" id="fkoCsv" accept=".csv">
+      </div>
+      <div>
+        <button id="fkoProcessBtn" class="btn btn-success">&#9654; Process Orders</button>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="fkoResults" style="display:none; margin-top:16px;">
+      <div class="summary-card">
+        <h4>&#10003; Processing Complete</h4>
+        <div class="summary-grid">
+          <div class="summary-item">Total Orders: <span id="fkoTotal">-</span></div>
+          <div class="summary-item">Folders Created: <span id="fkoCreated">-</span></div>
+          <div class="summary-item">Skipped (already done): <span id="fkoSkipped">-</span></div>
+        </div>
+      </div>
+      <table class="results-table" style="margin-top:12px; width:100%; font-size:.82rem; border-collapse:collapse;">
+        <thead>
+          <tr style="text-align:left; border-bottom:1px solid rgba(255,255,255,0.1);">
+            <th style="padding:6px 8px;">#</th>
+            <th style="padding:6px 8px;">Buyer Name</th>
+            <th style="padding:6px 8px;">Order ID</th>
+            <th style="padding:6px 8px;">Folder</th>
+            <th style="padding:6px 8px;">Status</th>
+          </tr>
+        </thead>
+        <tbody id="fkoTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+
+
 
 <div class="tab-panel active" id="tab-m5">
 <div class="module-card" id="m5Card">
@@ -3903,6 +3975,102 @@ $saveFolder.addEventListener('click', function() {
         currentTaskId = null;
     }
 })();
+
+
+</script>
+
+
+
+<script>
+(function() {
+  var $base = document.getElementById('fkoBase');
+  var $saveBase = document.getElementById('fkoSaveBase');
+  var $csv = document.getElementById('fkoCsv');
+  var $processBtn = document.getElementById('fkoProcessBtn');
+  var $results = document.getElementById('fkoResults');
+  var $pill = document.getElementById('fkoPill');
+
+  // Load saved base folder
+  fetch('/flipkart-orders/base-folder')
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d.folder) $base.value = d.folder; });
+
+  // Save base folder
+  $saveBase.addEventListener('click', function() {
+    var folder = $base.value.trim();
+    if(!folder) return alert('Enter a folder path');
+    fetch('/flipkart-orders/base-folder', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({folder: folder})
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error) alert(d.error);
+      else alert('Base folder saved!');
+    });
+  });
+
+  // Process CSV
+  $processBtn.addEventListener('click', function() {
+    if(!$csv.files || !$csv.files[0]) return alert('Please select a CSV file');
+    if(!$base.value.trim()) return alert('Please set and save a base folder first');
+
+    $processBtn.disabled = true;
+    $processBtn.textContent = 'Processing...';
+    $pill.className = 'status-pill pill-active';
+    $pill.textContent = 'Processing';
+
+    var fd = new FormData();
+    fd.append('csv', $csv.files[0]);
+
+    fetch('/flipkart-orders/process-csv', { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error) {
+          alert(d.error);
+          $pill.className = 'status-pill pill-error';
+          $pill.textContent = 'Error';
+          return;
+        }
+
+        $pill.className = 'status-pill pill-done';
+        $pill.textContent = 'Done';
+
+        // Show results
+        document.getElementById('fkoTotal').textContent = d.total;
+        document.getElementById('fkoCreated').textContent = d.created;
+        document.getElementById('fkoSkipped').textContent = d.skipped;
+
+        var $tbody = document.getElementById('fkoTbody');
+        $tbody.innerHTML = '';
+        d.results.forEach(function(r, i) {
+          var tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+          var statusColor = r.status === 'created' ? '#4ade80' : r.status === 'skipped' ? '#facc15' : '#f87171';
+          tr.innerHTML = '<td style="padding:6px 8px;">' + (i+1) + '</td>' +
+            '<td style="padding:6px 8px;">' + r.buyer_name + '</td>' +
+            '<td style="padding:6px 8px; font-size:.75rem; opacity:.7;">' + r.order_id + '</td>' +
+            '<td style="padding:6px 8px;">' + (r.folder || '-') + '</td>' +
+            '<td style="padding:6px 8px; color:' + statusColor + ';">' + r.status + '</td>';
+          $tbody.appendChild(tr);
+        });
+        $results.style.display = 'block';
+      })
+      .catch(function(e){ alert('Error: ' + e); })
+      .finally(function(){
+        $processBtn.disabled = false;
+        $processBtn.textContent = '▶ Process Orders';
+      });
+  });
+})();
+
+
+
+
+
+
+
 </script>
 
 </body>

@@ -1252,6 +1252,9 @@ from amazon_download import amazon_bp        # noqa: E402
 app.register_blueprint(amazon_bp)
 
 
+from flipkart_orders import flipkart_bp        # noqa: E402
+app.register_blueprint(flipkart_bp)
+
 _M6_SETTING_BASE = "m6_base_folder"
 
 # Regex to find Amazon-style order IDs like 407-6518891-4216357
