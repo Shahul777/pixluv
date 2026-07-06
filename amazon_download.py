@@ -1083,6 +1083,55 @@ def _generate_report(base_folder: Path, results: list[dict], ship_day: str,
         for i, fname in enumerate(wa_folders, 1):
             lines.append(f"  {i:3}. {fname}")
         lines.append("")
+
+
+
+
+
+
+    # --- Scan order folders for issues (empty / multiple zips) ---
+    empty_folders = []
+    multi_zip_folders = []
+    for d in sorted(base_folder.iterdir(), key=lambda x: x.name.lower()):
+        if not d.is_dir():
+            continue
+
+        # Skip WhatsApp folder and non-order folders
+        if d.name.lower() in ("whatsapp",):
+            continue
+
+        # Check folder contents
+        contents = list(d.iterdir())
+        if not contents:
+            empty_folders.append(d.name)
+        else:
+            zip_files = [f for f in contents if f.is_file() and f.suffix.lower() == ".zip"]
+            if len(zip_files) > 1 and all(f.suffix.lower() == ".zip" for f in contents if f.is_file()):
+                multi_zip_folders.append((d.name, len(zip_files)))
+
+    if empty_folders or multi_zip_folders:
+        lines.append("-" * 70)
+        lines.append("  FOLDER ALERTS")
+        lines.append("-" * 70)
+
+        if empty_folders:
+            lines.append("")
+            lines.append(f"  ⚠ EMPTY FOLDERS ({len(empty_folders)}) - no files found:")
+            for fname in empty_folders:
+                lines.append(f"    • {fname}")
+
+        if multi_zip_folders:
+            lines.append("")
+            lines.append(f"  ⚠ MULTIPLE QUANTITY ORDERS ({len(multi_zip_folders)}) - more than 1 zip:")
+            for fname, count in multi_zip_folders:
+                lines.append(f"    • {fname} -> {count} zip files")
+
+        lines.append("")
+
+
+
+
+
     lines.append("=" * 70)
     lines.append("  END OF REPORT")
     lines.append("=" * 70)
