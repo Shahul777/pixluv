@@ -948,6 +948,77 @@ def shipping_labels():
         download_name="optimized_shipping_labels.pdf",
     )
 
+def _process_flipkart_labels(file_streams: list) -> io.BytesIO:
+    """Extract shipping label (top half) from each Flipkart page, 4-up on landscape A4."""
+    # Merge all uploaded PDFs
+    merged = fitz.open()
+    for stream in file_streams:
+        src = fitz.open(stream=stream.read(), filetype="pdf")
+        merged.insert_pdf(src)
+        src.close()
+
+    if len(merged) == 0:
+        merged.close()
+        raise ValueError("No pages found in uploaded PDFs.")
+
+    # Clip the full top half (label area matches quadrant aspect ratio)
+    first_page = merged[0]
+    page_w = first_page.rect.width
+    page_h = first_page.rect.height
+    clip_rect = fitz.Rect(0, 0, page_w, page_h / 2)  # 595 x 421
+
+    # Portrait A4, 2x2 grid - labels at 120% of proportional fit (20% extra fill)
+    cols, rows = 2, 2
+    cell_w = A4_WIDTH / cols    # 297.64
+    cell_h = A4_HEIGHT / rows   # 420.95
+    zoom = 2.1  # 110% extra fill
+    dest_w = cell_w * zoom
+    dest_h = cell_h * zoom
+    labels_per_page = cols * rows
+    total_labels = len(merged)
+
+    # Build output PDF
+    output = fitz.open()
+
+    for i in range(0, total_labels, labels_per_page):
+        new_page = output.new_page(width=A4_WIDTH, height=A4_HEIGHT)
+        for idx in range(labels_per_page):
+            if i + idx >= total_labels:
+                break
+            col = idx % cols
+            row = idx // cols
+            # Center the zoomed dest_rect within each cell
+            cx = col * cell_w + cell_w / 2
+            cy = row * cell_h + cell_h / 2
+            dest_rect = fitz.Rect(cx - dest_w / 2, cy - dest_h / 2,
+                                  cx + dest_w / 2, cy + dest_h / 2)
+            new_page.show_pdf_page(dest_rect, merged, i + idx, clip=clip_rect)
+
+    merged.close()
+
+    buf = io.BytesIO()
+    output.save(buf)
+    output.close()
+    buf.seek(0)
+    return buf
+@app.route("/flipkart-shipping-labels", methods=["POST"])
+def flipkart_shipping_labels():
+    files = request.files.getlist("pdfs")
+    if not files or all(f.filename == "" for f in files):
+        return jsonify({"error": "No PDF files uploaded."}), 400
+
+    pdf_files = [f for f in files if f.filename and f.filename.lower().endswith(".pdf")]
+    if not pdf_files:
+        return jsonify({"error": "No valid PDF files found."}), 400
+
+    buf = _process_flipkart_labels(pdf_files)
+
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name="flipkart_shipping_labels.pdf",
+    )
 _M3_SETTING_BASE = "m3_base_folder"
 
 @app.route("/module3/base-folder", methods=["GET"])
