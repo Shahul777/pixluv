@@ -1079,6 +1079,35 @@ def module3_search():
     if not matches:
         return jsonify({"error": f"No PDFs found with order ID {order_id} in any output folder."}), 404
 
+
+
+
+
+    _part_re = re.compile(r"[-_\s]*\(?\d+[-_/]\d+\)?")
+    # Variants contain 'x': 3x2, 3x3, 4x3, 4x6
+    _variant_re_name = re.compile(r"(4x3|4x6|3x2|3x3)", re.IGNORECASE)
+    order_keys = set()
+    for m in matches:
+        fname = m["filename"].rsplit(".", 1)[0]  # strip .pdf
+        # Remove part indicators like "(1_2)", "(2_2)", "1-2", "1/2"
+        fname_clean = _part_re.sub("", fname).strip().rstrip("-_").strip()
+        # Find the order_id position and split into name_part and variant_part
+        idx = fname_clean.find(order_id)
+        if idx >= 0:
+            name_part = fname_clean[:idx].rstrip("-_ ").lower()
+            after_id = fname_clean[idx + len(order_id):].strip("-_ ")
+            # Only extract known variants (must contain 'x')
+            v_match = _variant_re_name.search(after_id)
+            variant = v_match.group(1).lower() if v_match else "default"
+        else:
+            name_part = fname_clean.lower()
+            variant = "default"
+        order_keys.add((name_part, variant))
+
+    is_multi_order = len(order_keys) > 1
+
+
+
     search_id = f"pv_{int(time.time() * 1000)}"
     with _preview_cache_lock:
         _preview_cache[search_id] = {
@@ -1092,7 +1121,7 @@ def module3_search():
         for k in [k for k, v in _preview_cache.items() if v["created"] < cutoff]:
             del _preview_cache[k]
 
-    return jsonify({"search_id": search_id, "matches": matches})
+    return jsonify({"search_id": search_id, "matches": matches, "is_multi_order": is_multi_order})
 
 
 @app.route("/module3/page/<search_id>/<int:match_idx>/<int:page_num>")

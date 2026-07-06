@@ -358,7 +358,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
    
     <button class="tab-btn" data-tab="tab-m2">&#128230; Shipping Labels</button>
     <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
-    <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button>
+    <!-- <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button> -->
     <button class="tab-btn" data-tab="tab-amz">&#128230;Amazon Download</button>
     <button class="tab-btn" data-tab="tab-fk-orders">&#128230;Flipkart Orders</button>
 </div>
@@ -608,6 +608,15 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
         </div>
 
         <div id="m3Preview" style="display:none; margin-top:22px;">
+
+
+          <div id="m3MultiAlert" style="display:none; background: rgba(250,204,21,0.12); border:1px solid rgba(250,204,21,0.3); border-radius:8px; padding:12px 16px; margin-bottom:14px; color:#facc15; font-size:.85rem;">
+    &#9888; <strong>Multiple orders found with this ID!</strong>
+    <span id="m3MultiCount"></span> - Use Prev/Next to browse each order.
+  </div>
+
+
+
             <div class="pdf-nav" id="m3PdfNav">
                 <button class="btn btn-outline" id="m3PrevPdf">&larr; Prev</button>
                 <div class="pdf-nav-label" id="m3PdfLabel"></div>
@@ -1909,7 +1918,7 @@ function enableControls() {
                 return;
             }
 
-            m3State = { search_id: res.data.search_id, matches: res.data.matches, currentIdx: 0 };
+            m3State = { search_id: res.data.search_id, matches: res.data.matches, currentIdx: 0, isMultiOrder: res.data.is_multi_order };
 
             var n = res.data.matches.length;
             $pill.className = 'status-pill pill-done';
@@ -1930,15 +1939,30 @@ function enableControls() {
     function renderCurrentPdf() {
         if (!m3State) return;
         var s = m3State, match = s.matches[s.currentIdx];
+        
 
-        $pdfNav.style.display = s.matches.length > 1 ? 'flex' : 'none';
-        var folderInfo = match.folder_name ? ' &nbsp;|&nbsp; ' + escHtml3(match.folder_name) : '';
-        $pdfLabel.innerHTML =
-            escHtml3(match.filename) +
-            '<small>' + match.page_count + ' page' + (match.page_count > 1 ? 's' : '') +
-                folderInfo + '</small>';
-            (s.matches.length > 1 ? '&nbsp;|&nbsp; PDF ' + (s.currentIdx + 1) + ' of ' + s.matches.length : '') +
-            '</small>';
+
+        // Show multi-order alert
+var $multiAlert = document.getElementById('m3MultiAlert');
+var $multiCount = document.getElementById('m3MultiCount');
+if (s.matches.length > 1 && s.isMultiOrder) {
+  $multiAlert.style.display = 'block';
+  $multiCount.textContent = ' (' + s.matches.length + ' different orders)';
+
+} else {
+  $multiAlert.style.display = 'none';
+ 
+}
+ $pdfNav.style.display = s.matches.length > 1 ? 'flex' : 'none';
+// Build label with order number and buyer name
+var orderLabel = s.matches.length > 1
+  ? '<strong style="color:#60a5fa;">Order ' + (s.currentIdx + 1) + ' of ' + s.matches.length + '</strong> &nbsp;|&nbsp; '
+  : '';
+var folderInfo = match.folder_name ? '<strong>' + escHtml3(match.folder_name) + '</strong>&nbsp;|&nbsp; ' : '';
+$pdfLabel.innerHTML = 
+  orderLabel + folderInfo +
+  escHtml3(match.filename) +
+  '<small>' + match.page_count + ' page' + (match.page_count > 1 ? 's' : '') + '</small>';
 
         $prevBtn.disabled = s.currentIdx === 0;
         $nextBtn.disabled = s.currentIdx === s.matches.length - 1;
