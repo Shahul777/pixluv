@@ -643,7 +643,7 @@ def confirm_preview(task_id: str):
 
     return jsonify({"ok": True})
 _log = logging.getLogger("extract-image")
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".heic", ".heif", ".webp"}
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".heic", ".heif", ".webp" , ".dng"}
 
 _OCR_KEYWORDS = re.compile(r"(Note\s*:|PIXLUV|contact)", re.IGNORECASE)
 
@@ -663,8 +663,12 @@ def _has_ocr_keyword(image_path: str) -> bool:
         # Large files are real photos - promo/note images are under 1MB
         if os.path.getsize(image_path) > _OCR_SKIP_SIZE:
             return False
+        
+        from imageplacer import _open_image
 
-        img = Image.open(image_path)
+
+        # img = Image.open(image_path)
+        img = _open_image(image_path)
         img = img.convert("RGB")
         import numpy as np
         img_array = np.array(img)

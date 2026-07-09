@@ -6,3 +6,5 @@ pillow-heif>=0.16
 natsort>=8.0
 rapidocr-onnxruntime
 playwright>=1.40
+rawpy>=0.19
+numpy>=1.24
