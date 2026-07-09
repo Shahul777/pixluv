@@ -25,6 +25,15 @@ try:
 except ImportError:
     HEIC_SUPPORTED = False
 
+
+try:
+    import rawpy
+
+    DNG_SUPPORTED = True
+except ImportError:
+    DNG_SUPPORTED = False
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 log = logging.getLogger("basa-web")
 
@@ -34,7 +43,8 @@ app.config["MAX_CONTENT_LENGTH"] = 600 * 1024 * 1024
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 if HEIC_SUPPORTED:
     SUPPORTED_EXTENSIONS |= {".heic", ".heif"}
-
+if DNG_SUPPORTED:
+    SUPPORTED_EXTENSIONS |= {".dng"}
 PAGE_W = 13.0
 PAGE_H = 19.0
 
@@ -190,11 +200,18 @@ def convert_to_cmyk_properly(img: Image.Image) -> Image.Image:
         return img.convert("CMYK")
 
 
+def _open_image(filepath: str) -> Image.Image:
+    """Open an image file, handling DNG raw files via rawpy."""
+    if Path(filepath).suffix.lower() == ".dng" and DNG_SUPPORTED:
+        with rawpy.imread(filepath) as raw:
+            rgb = raw.postprocess(use_camera_wb=True)
+        return Image.fromarray(rgb)
+    return Image.open(filepath)
 def process_image(filepath: str, out_path: str, layout: dict,
                   offset_x: float = 0.5, offset_y: float = 0.5,
                   mode: str = "fill", rotation: int = 0,
                   zoom: float = 1.0) -> None:
-    img = Image.open(filepath)
+    img = _open_image(filepath)
     img = _apply_exif_orientation(img)
     img = _flatten_alpha(img)
     if img.mode != "RGB":
@@ -350,7 +367,8 @@ def prepare_preview(image_paths: list[str], layout: dict,
     results = []
     for idx, src in enumerate(image_paths):
         try:
-            img = Image.open(src)
+            #img = Image.open(src)
+            img = _open_image(src)
             img = _apply_exif_orientation(img)
             img = _flatten_alpha(img)
             if img.mode != "RGB":
