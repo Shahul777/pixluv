@@ -557,7 +557,212 @@ def _number_shipping_labels(output_folder: Path,
         "report": "label_report.txt",
     }
     
+_FK_ORDER_RE = re.compile(r"OD\d{4}(\d{4})\d+")
 
+def _number_flipkart_labels(output_folder: Path,
+                            oid_to_serial: dict[str, int],
+                            q: queue.Queue | None = None,
+                            sorted_list: list[dict] | None = None) -> dict | None:
+
+    label_dir = output_folder / "label"
+    label_pdf = label_dir / "flipkart_shipping_labels.pdf"
+    if not label_pdf.exists():
+        label_pdf = output_folder / "flipkart_shipping_labels.pdf"
+        if not label_pdf.exists():
+            _m1_log.info("No Flipkart label PDF found in %s or %s",
+                         output_folder / "label", output_folder)
+            return None
+        label_dir = output_folder
+
+    _m1_log.info("Found Flipkart label PDF: %s", label_pdf)
+
+    try:
+        doc = fitz.open(str(label_pdf))
+    except Exception as exc:
+        _m1_log.warning("Cannot open Flipkart label PDF: %s", exc)
+        return None
+    
+    labeled_count = 0
+    total_pages = len(doc)
+
+    matched_oids: set[str] = set()
+    all_label_oids: set[str] = set()
+    unrecognised_labels: list[str] = []
+
+    def _find_fk_oid4(text: str) -> str | None:
+        
+        for m in _FK_ORDER_RE.finditer(text):
+            return m.group(1)
+        # Fallback: direct lookup of known 4-digit IDs if "OD" present
+        if "OD" in text.upper():
+            for known_oid in oid_to_serial:
+                if known_oid in text:
+                    return known_oid
+        return None
+    
+    _m1_log.info("Flipkart label scan: %d pages, %d known order IDs: %s",
+                 total_pages, len(oid_to_serial), list(oid_to_serial.keys()))
+    
+    for page_num in range(total_pages):
+        page = doc[page_num]
+        pw = page.rect.width
+        ph = page.rect.height
+        half_w = pw / 2
+        half_h = ph / 2
+
+        # 4 labels per page (2x2): top-left, top-right, bottom-left, bottom-right
+        quadrants = [
+            ("top-left",     fitz.Rect(0,      0,      half_w, half_h)),
+            ("top-right",    fitz.Rect(half_w, 0,      pw,     half_h)),
+            ("bottom-left",  fitz.Rect(0,      half_h, half_w, ph)),
+            ("bottom-right", fitz.Rect(half_w, half_h, pw,     ph)),
+        ]
+
+        for quad_name, clip in quadrants:
+            oid4 = None
+
+            # --- Extract text from this quadrant ---
+            text = page.get_text("text", clip=clip).strip()
+            if text:
+                oid4 = _find_fk_oid4(text)
+                if oid4:
+                    _m1_log.info("P%d %s: Flipkart TEXT match -> %s",
+                                 page_num+1, quad_name, oid4)
+                else:
+                    _m1_log.info("P%d %s: text found but no FK order ID. Preview: %.100s",
+                                 page_num+1, quad_name, text.replace('\n', ' '))
+            
+            if not oid4:
+                _m1_log.info("P%d %s: UNMATCHED (Flipkart)", page_num+1, quad_name)
+                unrecognised_labels.append(f"Page {page_num+1} {quad_name}")
+                continue
+            
+            all_label_oids.add(oid4)
+
+            if oid4 not in oid_to_serial:
+                _m1_log.info("P%d %s: found %s but NOT in output PDFs (excess)",
+                             page_num+1, quad_name, oid4)
+                continue
+            
+            matched_oids.add(oid4)
+            serial_text = f"{oid_to_serial[oid4]}."
+
+            stamp_x = None
+            stamp_y = None
+
+            gifts_hits = page.search_for("Personalized Gifts", clip=clip)
+            if gifts_hits:
+                # Place serial number below the last "Personalized Gifts" hit
+                last_hit = gifts_hits[-1]
+                stamp_x = last_hit.x0
+                stamp_y = last_hit.y1 + 12  # below the text
+            else:
+                # Fallback: search for "Polaroid Mini" or the QTY column area
+                polaroid_hits = page.search_for("Polaroid Mini", clip=clip)
+                if polaroid_hits:
+                    last_hit = polaroid_hits[-1]
+                    stamp_x = last_hit.x0
+                    stamp_y = last_hit.y1 + 24
+                else:
+                    # Last fallback: place near the bottom of the shipping
+                    # label portion (roughly 60% down in the quadrant)
+                    stamp_x = clip.x0 + 10
+                    stamp_y = clip.y0 + (clip.y1 - clip.y0) * 0.55
+            
+            # Draw white background + black serial number
+            serial_fs = 14
+            tw = fitz.get_text_length(serial_text, fontname="helv",
+                                      fontsize=serial_fs)
+            bg = fitz.Rect(stamp_x - 2, stamp_y - 2,
+                           stamp_x + tw + 3, stamp_y + serial_fs + 2)
+            page.draw_rect(bg, color=None, fill=(1, 1, 1))
+            page.insert_text((stamp_x, stamp_y + serial_fs - 2), serial_text,
+                             fontsize=serial_fs, fontname="helv",
+                             color=(0, 0, 0))
+            
+            labeled_count += 1
+            _m1_log.info("P%d %s: stamped '%s' for FK order %s",
+                         page_num+1, quad_name, serial_text, oid4)
+        
+        if q:
+            pct = 40 + int((page_num + 1) / total_pages * 8)
+            _emit(q, stage="labels", pct=pct,
+                  detail=f"FK Labels: page {page_num+1}/{total_pages} "
+                         f"({labeled_count} numbered)")
+
+    if labeled_count == 0:
+        doc.close()
+        return None
+    
+    out_name = "numbered_flipkart_labels.pdf"
+    out_path = label_dir / out_name
+    try:
+        doc.save(str(out_path))
+    except Exception as exc:
+        _m1_log.warning("Cannot save numbered Flipkart labels: %s", exc)
+        doc.close()
+        return None
+    doc.close()
+    _m1_log.info("Numbered %d Flipkart labels -> %s", labeled_count, out_path)
+
+    # --- Build report data ---
+    output_oids = set(oid_to_serial.keys())
+    missed_oids = output_oids - matched_oids
+    excess_oids = all_label_oids - output_oids
+
+    report_lines = [
+        "Flipkart Label Matching Report",
+        "=" * 55,
+        f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Label PDF: {label_pdf.name}",
+        f"Output Folder: {output_folder.name}",
+        "",
+        f"Total labels processed:   {labeled_count}",
+        f"Total output order IDs:   {len(output_oids)}",
+        f"Matched (numbered):       {len(matched_oids)}",
+        f"Missed (no label found):  {len(missed_oids)}",
+        f"Excess (label only):      {len(excess_oids)}",
+        "",
+    ]
+
+    report_lines.append("MATCHED ORDERS (serial -> order ID):")
+    report_lines.append("-" * 40)
+    for oid in sorted(matched_oids):
+        report_lines.append(f"  {oid_to_serial[oid]:>3}. -> {oid}")
+    report_lines.append("")
+
+    if missed_oids:
+        report_lines.append("MISSED ORDERS (output PDF exists, no matching label):")
+        report_lines.append("-" * 40)
+        for oid in sorted(missed_oids):
+            report_lines.append(f"  {oid_to_serial[oid]:>3}. -> {oid} ⚠ NO LABEL")
+        report_lines.append("")
+
+    if excess_oids:
+        report_lines.append("EXCESS LABELS (label exists, no matching output PDF):")
+        report_lines.append("-" * 40)
+        for oid in sorted(excess_oids):
+            report_lines.append(f"  {oid}  ⚠ NO OUTPUT PDF")
+        report_lines.append("")
+    
+    if unrecognised_labels:
+        report_lines.append("UNREADABLE LABEL POSITIONS:")
+        report_lines.append("-" * 40)
+        for pos in unrecognised_labels:
+            report_lines.append(f"  {pos}")
+        report_lines.append("")
+    
+    report_path = label_dir / "flipkart_label_report.txt"
+    report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+
+    return {
+        "filename": out_name,
+        "matched": len(matched_oids),
+        "missed": len(missed_oids),
+        "excess": len(excess_oids),
+        "unreadable": len(unrecognised_labels),
+        "report": "flipkart_label_report.txt",
+    }
 def _run_module1(folder_path: str, task_id: str):
     q = _get_progress_queue(task_id)
     if q is None:
@@ -668,20 +873,45 @@ def _run_module1(folder_path: str, task_id: str):
         try:
             label_result = _number_shipping_labels(folder, oid_to_serial, q, sorted_list)
             if label_result:
-                _emit(q, stage="labels", pct=48,
+                _emit(q, stage="labels", pct=45,
                       detail=f"Created {label_result['filename']} - "
                              f"matched: {label_result['matched']}, "
                              f"missed: {label_result['missed']}, "
                              f"excess: {label_result['excess']}")
             else:
                 label_result = None
-                _emit(q, stage="labels", pct=48,
-                      detail="No shipping labels found or nothing to number.")
+                _emit(q, stage="labels", pct=45,
+                      detail="No Amazon shipping labels found or nothing to number.")
         except Exception as exc:
             _m1_log.warning("Labels stage failed, skipping: %s", exc)
             label_result = None
-            _emit(q, stage="labels", pct=48,
+            _emit(q, stage="labels", pct=45,
                   detail="Labels step skipped (error).")
+            
+
+
+
+
+
+
+        # --- Stage: number Flipkart shipping labels ---
+        try:
+            fk_label_result = _number_flipkart_labels(folder, oid_to_serial, q, sorted_list)
+            if fk_label_result:
+                _emit(q, stage="labels", pct=48,
+                  detail=f"Created {fk_label_result['filename']} - "
+                         f"matched: {fk_label_result['matched']}, "
+                         f"missed: {fk_label_result['missed']}, "
+                         f"excess: {fk_label_result['excess']}")
+            else:
+                _emit(q, stage="labels", pct=48,
+                  detail="No Flipkart shipping labels found."
+                         if not label_result else
+                         f"Amazon labels done. No Flipkart labels.")
+        except Exception as exc:
+            _m1_log.warning("Flipkart labels stage failed, skipping: %s", exc)
+            _emit(q, stage="labels", pct=48,
+              detail="Flipkart labels step skipped (error).")
         _emit(q, stage="combine", pct=48,
               detail="Combining PDFs (lossless)...")
 
