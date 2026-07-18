@@ -3035,8 +3035,10 @@ $searchId.addEventListener('keydown', function (e) {
 
       // Attach toggle handler
       (function (cd_, btn_) {
-        btn_.addEventListener('click', function (e) {
+       // btn_.addEventListener('click', function (e) {
+       function doToggle(e) {
           e.stopPropagation();
+          e.preventDefault();
           if (cd_.mode === 'fill') {
             // Switch to FIT
             cd_.mode = 'fit';
@@ -3077,7 +3079,10 @@ $searchId.addEventListener('keydown', function (e) {
             cd_.el.style.cursor = 'grab';
             _syncClone(cd_);
           }
-        });
+        }
+        btn_.addEventListener('click', doToggle);
+        btn_.addEventListener('touchend', doToggle);
+
       })(cellData, toggleBtn);
       
       (function (cd_, btn_) {
@@ -3220,6 +3225,9 @@ applyZoom();  // applyZoom clamps to minimum
 
     function onDown(e) {
       if (cd.mode === 'fit') return; // no drag in fit mode
+
+      var tag = e.target.tagName && e.target.tagName.toLowerCase();
+      if (tag === 'button') return; 
       e.preventDefault();
       _setActiveCell(cd);
       dragging = true;
