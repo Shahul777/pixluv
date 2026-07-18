@@ -53,14 +53,17 @@ DAY_ABBREVS = {
 # --- Variant detection --------------------------------------------------------
 # Matches "4 x 3", "4x3", "4 x 3", "3 x 2" etc. in product title
 _VARIANT_RE = re.compile(r"(\d)\s*[xX]\s*(\d)")
-_VARIANT_PRIORITY = ["4x6", "3x2", "3x3"]
-_KNOWN_VARIANTS = {"4x3", "4x6", "3x2", "3x3"}
+_VARIANT_PRIORITY = ["magnet","4x6", "3x2", "3x3"]
+_KNOWN_VARIANTS = {"4x3", "4x6", "3x2", "3x3","magnet"}
 
 def _detect_variant_from_title(title: str) -> str:
 
     # Normalize: replace various separators to standard form for matching
     normalized = re.sub(r'(\d)\s*[xX×]\s*(\d)', r'\1x\2', title)
     normalized_lower = normalized.lower()
+
+    if "magnet" in normalized_lower:
+        return "magnet"
 
     # Check non-default variants first (priority)
     for v in _VARIANT_PRIORITY:
@@ -125,6 +128,9 @@ def _build_folder_name(name: str, order_id_4: str, variant: str, photo_count: st
         return f"{clean_name}-{order_id_4}"
     elif variant in ("3x2", "3x3") and photo_count:
         return f"{clean_name}-{order_id_4}-({photo_count})-{variant}"
+    
+    elif variant == "magnet":
+        return f"{clean_name}-{order_id_4}-magnet"
     else:
         return f"{clean_name}-{order_id_4}-{variant}"
 

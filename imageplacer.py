@@ -101,14 +101,24 @@ LAYOUTS = {
         "frame_w_px": 1110, "frame_h_px": 1710,
         "rotate": False, "label_y": 0.25,
     },
-    "magnet_18": {
+#     "magnet_18": {
+#     "label": "3.75x2.75 Magnet (18 per sheet)",
+#     "cols": 3, "rows": 6, "max_images": 18,
+#     "cell_w": 3.75, "cell_h": 2.75,
+#     "grid_left": 0.875, "grid_bottom": 1.25,
+#     "photo_w": 2.92, "photo_h": 2.47,
+#     "offset_x": 0.69, "offset_y": 0.14,
+#     "frame_w_px": 741, "frame_h_px": 873,
+#     "rotate": True, "label_y": 0.25,
+# },
+ "magnet_18": {
     "label": "3.75x2.75 Magnet (18 per sheet)",
     "cols": 3, "rows": 6, "max_images": 18,
-    "cell_w": 3.75, "cell_h": 2.75,
-    "grid_left": 0.875, "grid_bottom": 1.25,
-    "photo_w": 2.92, "photo_h": 2.47,
-    "offset_x": 0.69, "offset_y": 0.14,
-    "frame_w_px": 741, "frame_h_px": 873,
+    "cell_w": 4.2, "cell_h": 3.0,
+    "grid_left": 0.2, "grid_bottom": 0.5,
+    "photo_w": 3.55, "photo_h": 2.69,
+    "offset_x": 0.50, "offset_y": 0.15,
+    "frame_w_px": 807, "frame_h_px": 1065,
     "rotate": True, "label_y": 0.25,
 },
 "4x4_square_12": {
@@ -121,6 +131,7 @@ LAYOUTS = {
     "frame_w_px": 1038, "frame_h_px": 1038,
     "rotate": False, "label_y": 0.25,
 },
+
 "5x7_frame_4": {
     "label": "5x7 Frame (4 per sheet)",
     "cols": 2, "rows": 2, "max_images": 4,
