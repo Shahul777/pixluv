@@ -355,7 +355,7 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <div class="tab-bar" id="tabBar">
     <button class="tab-btn active" data-tab="tab-m5">&#127912; Polaroid Placement</button>
     <button class="tab-btn" data-tab="tab-m1">&#128196; PDF Combine</button>
-   
+   <button class="tab-btn" data-tab="tab-pdfhandler">&#128451; PDF Handler</button>
     <button class="tab-btn" data-tab="tab-m2">&#128230; Shipping Labels</button>
     <button class="tab-btn" data-tab="tab-m3">&#128269; Order Preview</button>
     <!-- <button class="tab-btn" data-tab="tab-m4">&#128248; Find by Image</button> -->
@@ -478,6 +478,131 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
             </div>
         </div>
     </div>
+
+
+
+    <!-- =================== PDF Handler =================== -->
+<div class="tab-panel" id="tab-pdfhandler">
+    <!-- Split Combined PDF -->
+    <div class="module-card" id="phSplitCard">
+        <div class="module-header">
+            <div class="step-circle" style="background:linear-gradient(135deg, #f59e42, #ef4444);">&#9986;</div>
+            <span class="module-title">
+                Split Combined PDF by Variant
+                <span class="status-pill pill-pending" id="phSplitPill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Select a <strong>combined PDF</strong> (from PDF Combine tool). It will be split into separate PDFs:
+            <strong>4x3</strong> as one PDF, <strong>4x6</strong> as one PDF, and
+            <strong>3x3 / 3x2 / magnet</strong> grouped as one PDF.
+            Output files are saved in the same folder. The original combined PDF is removed.
+        </p>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="phSplitFile">Combined PDF Path</label>
+                <input type="text" class="form-input" id="phSplitFile" placeholder="C:\Users\you\Desktop\Orders\ship-output\40-combined-10.pdf">
+            </div>
+            <div>
+                <button id="phSplitBtn" class="btn btn-primary">&#9986; Split</button>
+            </div>
+        </div>
+
+        <div id="phSplitStatus" style="margin-top:16px; display:none;">
+            <span id="phSplitStatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+        </div>
+
+        <div class="summary-card" id="phSplitSummary" style="display:none; margin-top:16px;">
+            <h4>&#10003; Split Complete</h4>
+            <div id="phSplitResults" style="font-size:.84rem; color:#ccc;"></div>
+        </div>
+    </div>
+<div class="module-card" id="phHalfCard" style="margin-top:18px;">
+    <div class="module-header">
+        <div class="step-circle" style="background:linear-gradient(135deg, #8b5cf6, #a78bfa);">&#9986;</div>
+        <span class="module-title">
+            Split PDF in Half
+            <span class="status-pill pill-pending" id="phHalfPill">Ready</span>
+        </span>
+    </div>
+    <p class="module-desc">
+        Split a PDF into <strong>two equal halves</strong> by page count.
+        If odd pages, the first half gets the extra page. Original PDF is removed after splitting.
+    </p>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="phHalfFile">PDF Path</label>
+            <input type="text" class="form-input" id="phHalfFile" placeholder="C:\Users\you\path\to\file.pdf">
+        </div>
+        <div>
+            <button id="phHalfBtn" class="btn btn-primary">&#9986; Split Half</button>
+        </div>
+    </div>
+
+    <div id="phHalfStatus" style="margin-top:16px; display:none;">
+        <span id="phHalfStatusText" style="font-size:.84rem; color: #60a5fa;"></span>
+    </div>
+
+    <div class="summary-card" id="phHalfSummary" style="display:none; margin-top:16px;">
+        <h4>&#10003; Split Complete</h4>
+        <div id="phHalfResults" style="font-size:.84rem; color: #ccc;"></div>
+    </div>
+</div>
+    <!-- Merge PDFs -->
+    <div class="module-card" id="phMergeCard" style="margin-top:18px;">
+        <div class="module-header">
+            <div class="step-circle" style="background:linear-gradient(135deg, #059669, #34d399);">&#128279;</div>
+            <span class="module-title">
+                Merge Multiple PDFs
+                <span class="status-pill pill-pending" id="phMergePill">Ready</span>
+            </span>
+        </div>
+        <p class="module-desc">
+            Select multiple PDFs in order. Pages from the 2nd onwards will be appended to the <strong>first PDF</strong>.
+            The first PDF becomes the merged output. Order of pages is preserved. No quality loss.
+        </p>
+
+        <div id="phMergeList" style="margin-bottom:14px;">
+            <div class="form-row ph-merge-row" style="margin-bottom:8px;">
+                <div class="form-group">
+                    <label>PDF 1 (target)</label>
+                    <input type="text" class="form-input ph-merge-input" placeholder="C:\path\to\first.pdf">
+                </div>
+            </div>
+            <div class="form-row ph-merge-row" style="margin-bottom:8px;">
+                <div class="form-group">
+                    <label>PDF 2</label>
+                    <input type="text" class="form-input ph-merge-input" placeholder="C:\path\to\second.pdf">
+                </div>
+                <div>
+                    <button class="btn btn-outline ph-remove-btn" style="padding:8px 12px; color:#f87171; border-color:rgba(239,68,68,0.3);" title="Remove">&times;</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-row" style="gap:10px;">
+            <button id="phAddPdfBtn" class="btn btn-outline" style="padding:8px 16px;">&#43; Add PDF</button>
+            <button id="phMergeBtn" class="btn btn-success">&#128279; Merge</button>
+        </div>
+
+        <div id="phMergeStatus" style="margin-top:16px; display:none;">
+            <span id="phMergeStatusText" style="font-size:.84rem; color:#60a5fa;"></span>
+        </div>
+
+        <div class="summary-card" id="phMergeSummary" style="display:none; margin-top:16px;">
+            <h4>&#10003; Merge Complete</h4>
+            <div id="phMergeResults" style="font-size:.84rem; color:#ccc;"></div>
+        </div>
+    </div>
+</div>
+
+
+
+
+
+
     <div class="tab-panel" id="tab-m2">
     <div class="module-card" id="m2Card">
         <div class="module-header">
@@ -3568,7 +3693,262 @@ x: Math.round(finalX * 1000) / 1000,
 })();
 
 
+
+
 </script>
+
+<!-- PDF Handler Module JS -->
+<script>
+(function() {
+  // — Split functionality —
+  var $splitFile = document.getElementById('phSplitFile');
+  var $splitBtn = document.getElementById('phSplitBtn');
+  var $splitStatus = document.getElementById('phSplitStatus');
+  var $splitStatusText = document.getElementById('phSplitStatusText');
+  var $splitSummary = document.getElementById('phSplitSummary');
+  var $splitResults = document.getElementById('phSplitResults');
+  var $splitPill = document.getElementById('phSplitPill');
+
+  $splitBtn.addEventListener('click', function() {
+    var pdfPath = $splitFile.value.trim();
+    if (!pdfPath) { showAlert('danger', 'Enter the path to the combined PDF.'); return; }
+
+    $splitBtn.disabled = true;
+    $splitBtn.textContent = 'Processing...';
+    $splitPill.className = 'status-pill pill-running';
+    $splitPill.innerHTML = '&#9679; Running';
+    $splitStatus.style.display = 'block';
+    $splitStatusText.textContent = 'Splitting PDF by variant...';
+    $splitSummary.style.display = 'none';
+
+    fetch('/pdf-handler/split', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pdf_path: pdfPath})
+    })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+      if (!res.ok || res.data.error) {
+        showAlert('danger', res.data.error || 'Split failed.');
+        $splitPill.className = 'status-pill pill-pending';
+        $splitPill.textContent = 'Ready';
+        $splitStatus.style.display = 'none';
+        return;
+      }
+      var d = res.data;
+      $splitPill.className = 'status-pill pill-done';
+      $splitPill.innerHTML = '&#10003; Done';
+      $splitStatus.style.display = 'none';
+      $splitSummary.style.display = 'block';
+
+      var html = '<p style="margin-bottom:10px;">Total pages processed: <strong>' + d.total_pages + '</strong></p>';
+      html += '<p style="margin-bottom:8px;">Original removed: <code>' + d.original_removed + '</code></p>';
+      html += '<table style="width:100%; font-size:.82rem; border-collapse:collapse;">';
+      html += '<thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="padding:6px 10px; text-align:left;">File</th><th style="padding:6px 10px; text-align:left;">Pages</th><th style="padding:6px 10px; text-align:left;">Group</th></tr></thead><tbody>';
+      d.output_files.forEach(function(f) {
+        html += '<tr><td style="padding:6px 10px; color:#a78bfa;">' + f.filename + '</td><td style="padding:6px 10px;">' + f.pages + '</td><td style="padding:6px 10px;">' + f.group + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      $splitResults.innerHTML = html;
+    })
+    .catch(function(e) {
+      showAlert('danger', 'Error: ' + e.message);
+      $splitPill.className = 'status-pill pill-pending';
+      $splitPill.textContent = 'Ready';
+      $splitStatus.style.display = 'none';
+    })
+    .finally(function() {
+      $splitBtn.disabled = false;
+      $splitBtn.innerHTML = '&#9986; Split';
+    });
+  });
+var $halfFile = document.getElementById('phHalfFile');
+var $halfBtn = document.getElementById('phHalfBtn');
+var $halfStatus = document.getElementById('phHalfStatus');
+var $halfStatusText = document.getElementById('phHalfStatusText');
+var $halfSummary = document.getElementById('phHalfSummary');
+var $halfResults = document.getElementById('phHalfResults');
+var $halfPill = document.getElementById('phHalfPill');
+
+$halfBtn.addEventListener('click', function() {
+    var pdfPath = $halfFile.value.trim();
+    if (!pdfPath) { showAlert('danger', 'Enter the path to the PDF.'); return; }
+
+    $halfBtn.disabled = true;
+    $halfBtn.textContent = 'Processing...';
+    $halfPill.className = 'status-pill pill-running';
+    $halfPill.innerHTML = '&#9679; Running';
+    $halfStatus.style.display = 'block';
+    $halfStatusText.textContent = 'Splitting PDF in half...';
+    $halfSummary.style.display = 'none';
+
+    fetch('/pdf-handler/split-half', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({pdf_path: pdfPath})
+    })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+        if (!res.ok || res.data.error) {
+            showAlert('danger', res.data.error || 'Split failed.');
+            $halfPill.className = 'status-pill pill-pending';
+            $halfPill.textContent = 'Ready';
+            $halfStatus.style.display = 'none';
+            return;
+        }
+        var d = res.data;
+        $halfPill.className = 'status-pill pill-done';
+        $halfPill.innerHTML = '&#10003; Done';
+        $halfStatus.style.display = 'none';
+        $halfSummary.style.display = 'block';
+
+        var html = '<p style="margin-bottom:10px;">Total pages: <strong>' + d.total_pages + '</strong></p>';
+        html += '<table style="width:100%; font-size:.82rem; border-collapse:collapse;">';
+        html += '<thead style="border-bottom:1px solid rgba(255,255,255,0.1);"><tr><th style="padding:6px 10px; text-align:left;">File</th><th style="padding:6px 10px; text-align:left;">Pages</th></tr></thead><tbody>';
+        d.files.forEach(function(f) {
+            html += '<tr><td style="padding:6px 10px; color:#a78bfa;">' + f.filename + '</td><td style="padding:6px 10px;">' + f.pages + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        $halfResults.innerHTML = html;
+    })
+    .catch(function(e) {
+        showAlert('danger', 'Error: ' + e.message);
+        $halfPill.className = 'status-pill pill-pending';
+        $halfPill.textContent = 'Ready';
+        $halfStatus.style.display = 'none';
+    })
+    .finally(function() {
+        $halfBtn.disabled = false;
+        $halfBtn.innerHTML = '&#9986; Split Half';
+    });
+});
+  // — Merge functionality —
+  var $mergeList = document.getElementById('phMergeList');
+  var $addPdfBtn = document.getElementById('phAddPdfBtn');
+  var $mergeBtn = document.getElementById('phMergeBtn');
+  var $mergeStatus = document.getElementById('phMergeStatus');
+  var $mergeStatusText = document.getElementById('phMergeStatusText');
+  var $mergeSummary = document.getElementById('phMergeSummary');
+  var $mergeResults = document.getElementById('phMergeResults');
+  var $mergePill = document.getElementById('phMergePill');
+  var mergeCounter = 2;
+
+  // Add PDF row
+  $addPdfBtn.addEventListener('click', function() {
+    mergeCounter++;
+    var row = document.createElement('div');
+    row.className = 'form-row ph-merge-row';
+    row.style.marginBottom = '8px';
+
+
+
+    row.innerHTML = '<div class="form-group"><label>PDF ' + mergeCounter + '</label><input type="text" class="form-input ph-merge-input" placeholder="C:\\path\\to\\file.pdf"></div><div><button class="btn btn-outline ph-remove-btn" style="padding:8px 12px; color:#f87171; border-color:rgba(239,68,68,0.3);" title="Remove">&times;</button></div>';
+    $mergeList.appendChild(row);
+    
+    // Bind remove
+    row.querySelector('.ph-remove-btn').addEventListener('click', function() {
+      row.remove();
+      _renumberMergeRows();
+    });
+  });
+
+  // Remove button handler for initial rows
+  document.querySelectorAll('.ph-remove-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var row = btn.closest('.ph-merge-row');
+      // Don't remove if only 2 rows left
+      var rows = $mergeList.querySelectorAll('.ph-merge-row');
+      if (rows.length <= 2) { showAlert('danger', 'At least 2 PDFs are required.'); return; }
+      row.remove();
+      _renumberMergeRows();
+    });
+  });
+
+  function _renumberMergeRows() {
+    var rows = $mergeList.querySelectorAll('.ph-merge-row');
+    rows.forEach(function(r, i) {
+      var label = r.querySelector('label');
+      if (i === 0) label.textContent = 'PDF 1 (target)';
+      else label.textContent = 'PDF ' + (i + 1);
+    });
+    mergeCounter = rows.length;
+  }
+
+  // Merge button
+  $mergeBtn.addEventListener('click', function() {
+    var inputs = $mergeList.querySelectorAll('.ph-merge-input');
+    var paths = [];
+    inputs.forEach(function(inp) {
+      var v = inp.value.trim();
+      if (v) paths.push(v);
+    });
+
+    if (paths.length < 2) { showAlert('danger', 'Enter at least 2 PDF paths.'); return; }
+
+    $mergeBtn.disabled = true;
+    $mergeBtn.textContent = 'Merging...';
+    $mergePill.className = 'status-pill pill-running';
+    $mergePill.innerHTML = '&#9679; Running';
+    $mergeStatus.style.display = 'block';
+    $mergeStatusText.textContent = 'Merging PDFs...';
+    $mergeSummary.style.display = 'none';
+
+    fetch('/pdf-handler/merge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pdf_paths: paths})
+    })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+      if (!res.ok || res.data.error) {
+        showAlert('danger', res.data.error || 'Merge failed.');
+        $mergePill.className = 'status-pill pill-pending';
+        $mergePill.textContent = 'Ready';
+        $mergeStatus.style.display = 'none';
+        return;
+      }
+      var d = res.data;
+      $mergePill.className = 'status-pill pill-done';
+      $mergePill.innerHTML = '&#10003; Done';
+      $mergeStatus.style.display = 'none';
+      $mergeSummary.style.display = 'block';
+
+      var html = '<p><strong>' + d.first_pdf + '</strong></p>';
+      html += '<p style="margin-top:6px;">Original pages: ' + d.original_pages + '</p>';
+      html += '<p>Added pages: ' + d.added_pages + '</p>';
+      html += '<p>Total pages now: <strong>' + d.total_pages + '</strong></p>';
+      html += '<p style="margin-top:4px; color:#4ade80;">Merged ' + d.merged_count + ' PDFs successfully.</p>';
+      $mergeResults.innerHTML = html;
+    })
+    .catch(function(e) {
+      showAlert('danger', 'Error: ' + e.message);
+      $mergePill.className = 'status-pill pill-pending';
+      $mergePill.textContent = 'Ready';
+      $mergeStatus.style.display = 'none';
+    })
+    .finally(function() {
+      $mergeBtn.disabled = false;
+      $mergeBtn.innerHTML = '&#128279; Merge';
+    });
+  });
+})();
+
+
+
+
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
 
 <script>
 (function() {

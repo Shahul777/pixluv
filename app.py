@@ -1751,10 +1751,57 @@ def fl_process():
 
 
 
+from pdf_handler import split_combined_pdf, split_pdf_half,merge_pdfs
+
+
+@app.route("/pdf-handler/split", methods=["POST"])
+def pdf_handler_split():
+    """Split a combined PDF by variant groups."""
+    data = request.get_json(silent=True) or {}
+    pdf_path = data.get("pdf_path", "").strip().strip('"')
+    if not pdf_path:
+        return jsonify({"error": "pdf_path is required"}), 400
+    pdf_path = os.path.normpath(pdf_path)
+    if not os.path.isfile(pdf_path):
+        return jsonify({"error": f"File not found: {pdf_path}"}), 400
+    result = split_combined_pdf(pdf_path)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+@app.route("/pdf-handler/split-half", methods=["POST"])
+def pdf_handler_split_half():
+    """Split a PDF into two equal halves."""
+    data = request.get_json(silent=True) or {}
+    pdf_path = data.get("pdf_path", "").strip().strip('"')
+    if not pdf_path:
+        return jsonify({"error": "pdf_path is required"}), 400
+    pdf_path = os.path.normpath(pdf_path)
+    if not os.path.isfile(pdf_path):
+        return jsonify({"error": f"File not found: {pdf_path}"}), 400
+    result = split_pdf_half(pdf_path)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route("/pdf-handler/merge", methods=["POST"])
+def pdf_handler_merge():
+    """Merge multiple PDFs into the first one."""
+    data = request.get_json(silent=True) or {}
+    pdf_paths = data.get("pdf_paths", [])
+    if not pdf_paths or not isinstance(pdf_paths, list):
+        return jsonify({"error": "pdf_paths array is required"}), 400
+    # Normalize paths
+    pdf_paths = [os.path.normpath(p.strip().strip('"')) for p in pdf_paths if p.strip()]
+    if len(pdf_paths) < 2:
+        return jsonify({"error": "At least 2 PDF paths are required"}), 400
+    result = merge_pdfs(pdf_paths)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5200)
-    
-                
 
 
 
