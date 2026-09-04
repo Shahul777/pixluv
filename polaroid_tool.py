@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_setting, set_setting, log_activity
 
 # --- Import image-placement engine from imageplacer.py ---
-from imageplacer import (LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf,prepare_preview,PAGE_W,PAGE_H)
+from imageplacer import (LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf,generate_poster_pdf,prepare_preview,PAGE_W,PAGE_H)
 
 polaroid_bp = Blueprint("polaroid", __name__)
 log = logging.getLogger("polaroid")
@@ -36,7 +36,7 @@ _preview_tmp_dirs: dict[str, str] = {}  # task_id -> temp dir pa
 SETTING_BASE_FOLDER = "polaroid_base_folder"
 _pdf_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pdf-gen")
 # Variant regex: ends with -3x2 or -3x3 (case-insensitive)
-_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23]|4x[46]|5x7|magnet)\s*$", re.IGNORECASE)
+_VARIANT_SUFFIX_RE = re.compile(r"-(3x[23]|4x[46]|5x7|magnet|poster)\s*$", re.IGNORECASE)
 
 # Ship-folder pattern: contains "ship" and "image" (flexible date formats)
 _SHIP_FOLDER_RE = re.compile(r"ship.*image", re.IGNORECASE)
@@ -56,6 +56,7 @@ _VARIANT_TO_LAYOUT = {
     "4x4": "4x4_square_12",
     "5x7": "5x7_frame_4",
     "magnet": "magnet_18",
+    "poster": "poster_4x6",
 }
 
 _UPS = {
@@ -66,7 +67,117 @@ _UPS = {
     "4x4": 12,
     "5x7": 4,
     "magnet": 18,
+    "poster": 100
 }
+
+
+import random
+
+def _crop_to_2x3(img: Image.Image) -> Image.Image:
+    """Crop image to 2:3 aspect ratio (portrait) from center."""
+    w, h = img.size
+    target_ratio = 2 / 3
+    current_ratio = w / h
+    if current_ratio > target_ratio:
+        # Too wide - crop sides
+        new_w = int(h * target_ratio)
+        left = (w - new_w) // 2
+        img = img.crop((left, 0, left + new_w, h))
+    elif current_ratio < target_ratio:
+        # Too tall - crop top/bottom
+        new_h = int(w / target_ratio)
+        top = (h - new_h) // 2
+        img = img.crop((0, top, w, top + new_h))
+    return img
+
+def generate_poster_collages(image_paths: list[str], output_dir: Path,
+                             folder_name: str) -> list[str]:
+
+    OUTPUT_SIZE = 1024
+    output_files: list[str] = []
+
+    # Load and crop all images to 2:3
+    thumbs: list[Image.Image] = []
+    for p in image_paths:
+        try:
+            img = Image.open(p)
+            img = img.convert("RGB")
+            img = _crop_to_2x3(img)
+            thumbs.append(img)
+        except Exception:
+            continue
+
+    if not thumbs:
+        return output_files
+
+    num = len(thumbs)
+
+    # --- Style 1: Tight grid (no gaps) ---
+    cols1, rows1 = 9, 6
+    cell_w1 = OUTPUT_SIZE / cols1
+    cell_h1 = OUTPUT_SIZE / rows1
+    canvas1 = Image.new("RGB", (OUTPUT_SIZE, OUTPUT_SIZE), (255, 255, 255))
+    for i, thumb in enumerate(thumbs[:cols1 * rows1]):
+        row, col = divmod(i, cols1)
+        resized = thumb.resize((int(cell_w1), int(cell_h1)), Image.LANCZOS)
+        canvas1.paste(resized, (int(col * cell_w1), int(row * cell_h1)))
+    out1 = str(output_dir / f"{folder_name}-collage-grid.jpg")
+    canvas1.save(out1, "JPEG", quality=92)
+    output_files.append(out1)
+
+    # --- Style 2: Spaced grid (with gaps) ---
+    cols2, rows2 = 9, 6
+    gap = 3
+    avail_w = OUTPUT_SIZE - (cols2 + 1) * gap
+    avail_h = OUTPUT_SIZE - (rows2 + 1) * gap
+    cell_w2 = avail_w / cols2
+    cell_h2 = avail_h / rows2
+    canvas2 = Image.new("RGB", (OUTPUT_SIZE, OUTPUT_SIZE), (30, 30, 30))
+    for i, thumb in enumerate(thumbs[:cols2 * rows2]):
+        row, col = divmod(i, cols2)
+        resized = thumb.resize((int(cell_w2), int(cell_h2)), Image.LANCZOS)
+        x = int(gap + col * (cell_w2 + gap))
+        y = int(gap + row * (cell_h2 + gap))
+        canvas2.paste(resized, (x, y))
+    out2 = str(output_dir / f"{folder_name}-collage-spaced.jpg")
+    canvas2.save(out2, "JPEG", quality=92)
+    output_files.append(out2)
+
+    # --- Style 3: Scattered overlap ---
+    canvas3 = Image.new("RGB", (OUTPUT_SIZE, OUTPUT_SIZE), (240, 240, 240))
+    # Each image is roughly 140x210 (2:3), placed with random offset/rotation
+    scatter_w, scatter_h = 140, 210
+    # Shuffle order for natural overlap
+    indices = list(range(num))
+    random.shuffle(indices)
+    # Place images in a rough grid with random jitter and slight rotation
+    approx_cols = 8
+    approx_rows = math.ceil(num / approx_cols)
+    spacing_x = (OUTPUT_SIZE - scatter_w) / max(approx_cols - 1, 1)
+    spacing_y = (OUTPUT_SIZE - scatter_h) / max(approx_rows - 1, 1)
+
+    for seq, idx in enumerate(indices):
+        if idx >= num:
+            continue
+        thumb = thumbs[idx]
+        resized = thumb.resize((scatter_w, scatter_h), Image.LANCZOS)
+        # Random rotation ±5 degrees
+        angle = random.uniform(-5, 5)
+        rotated = resized.rotate(angle, expand=True, fillcolor=(240, 240, 240))
+        # Grid position with jitter
+        grid_row, grid_col = divmod(seq, approx_cols)
+        base_x = int(grid_col * spacing_x)
+        base_y = int(grid_row * spacing_y)
+        jitter_x = random.randint(-15, 15)
+        jitter_y = random.randint(-15, 15)
+        x = max(0, min(OUTPUT_SIZE - rotated.width, base_x + jitter_x))
+        y = max(0, min(OUTPUT_SIZE - rotated.height, base_y + jitter_y))
+        canvas3.paste(rotated, (x, y))
+    out3 = str(output_dir / f"{folder_name}-collage-scatter.jpg")
+    canvas3.save(out3, "JPEG", quality=92)
+    output_files.append(out3)
+
+    return output_files
 def _new_q(task_id: str) -> queue.Queue:
     q: queue.Queue = queue.Queue()
     with _pq_lock:
@@ -390,10 +501,22 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
                 with _preview_lock:
                     _preview_tmp_dirs.pop(task_id, None)
                     # Generate final PDF in background thread so next preview loads instantly
-                _pdf_futures.append(_pdf_executor.submit(
-                         generate_pdf, batch, pdf_out, label, layout, layout_key,
-                                    offsets=user_offsets
-                                                ))
+                # _pdf_futures.append(_pdf_executor.submit(
+                #          generate_pdf, batch, pdf_out, label, layout, layout_key,
+                #                     offsets=user_offsets
+                #                                 ))
+
+
+                if variant == "poster":
+                    _pdf_futures.append(_pdf_executor.submit(
+                generate_poster_pdf, batch, pdf_out,
+                offsets=user_offsets
+                                 ))
+                else:
+                    _pdf_futures.append(_pdf_executor.submit(
+                generate_pdf, batch, pdf_out, label, layout, layout_key,
+                   offsets=user_offsets
+                        ))
 
    
                 pdf_count += 1
@@ -405,6 +528,25 @@ def _run_polaroid(ship_folder_path: str, task_id: str):
                 "order_id": order_id or "", "status": "done",
                 "pdfs": num_pdfs, "photos": num_photos,
             })
+
+
+
+
+
+            # --- Generate collages for poster orders -----------------------
+            if variant == "poster":
+                _emit(q, stage="process", pct=10 + int((oi + 1) / total_orders * 85),
+                  detail=f"Generating collages: {folder_name}",
+                  done=False, order_index=oi, order_total=total_orders,
+                  order_name=folder_name, status="collage")
+                try:
+                    collage_files = generate_poster_collages(
+                    images, output_dir, folder_name)
+                    log.info("Generated %d collages for %s",
+                         len(collage_files), folder_name)
+                except Exception as exc:
+                    log.warning("Collage generation failed for %s: %s",
+                            folder_name, exc)
 
         # --- Stage: done -----------------------------------------
         

@@ -22,16 +22,20 @@ def _detect_variant(filename: str) -> str:
 def _is_combined(filename: str) -> bool:
     return bool(COMBINED_RE.search(filename))
 
-
 def split_combined_pdf(combined_pdf_path: str) -> dict:
-    """Split a combined PDF into separate PDFs by variant."""
-    combined_path = Path(combined_pdf_path)
-    if not combined_path.exists():
-        return {"error": f"File not found: {combined_pdf_path}"}
+    """Group individual order PDFs by variant (from filename) and combine each group."""
 
-    folder = combined_path.parent
+    input_path = Path(combined_pdf_path)
 
-    # Find all individual order PDFs (non-combined) in the folder
+    # Accept either a folder or a file (use its parent folder)
+    if input_path.is_dir():
+        folder = input_path
+    elif input_path.is_file():
+        folder = input_path.parent
+    else:
+        return {"error": f"Path not found: {combined_pdf_path}"}
+
+    # Collect all PDFs in the folder (skip subfolders and combined PDFs)
     individual_pdfs = []
     for f in folder.iterdir():
         if not f.is_file():
@@ -43,140 +47,89 @@ def split_combined_pdf(combined_pdf_path: str) -> dict:
         individual_pdfs.append(f)
 
     if not individual_pdfs:
-        return {"error": "No individual order PDFs found in the folder to determine variant boundaries."}
+        return {"error": "No individual order PDFs found in the folder."}
 
-    # Sort them the same way the combine process does (by numeric prefix)
+    # Sort by name ascending
     individual_pdfs.sort(key=lambda x: x.name.lower())
 
-    # Build page mapping: for each individual PDF, get its page count and variant
-    page_map = []  # list of (variant, page_count, filename)
-    for pdf_file in individual_pdfs:
-        try:
-            doc = fitz.open(str(pdf_file))
-            pc = len(doc)
-            doc.close()
-            variant = _detect_variant(pdf_file.name)
-            page_map.append((variant, pc, pdf_file.name))
-        except Exception:
-            continue
-
-    if not page_map:
-        return {"error": "Could not read any individual PDFs in the folder."}
-
-    # Calculate total pages from individual PDFs
-    total_individual_pages = sum(pc for _, pc, _ in page_map)
-
-    # Open the combined PDF
-    combined_doc = fitz.open(str(combined_path))
-    combined_pages = len(combined_doc)
-
-    # Verify page count matches (allow slight mismatch due to edge cases)
-    if abs(combined_pages - total_individual_pages) > 0:
-        # If mismatch, we still proceed but use the combined PDF's actual page count
-        # and map proportionally or just use what we have
-        pass
-
-    # Group consecutive pages by variant
-    # Build: variant -> list of page indices in the combined PDF
-    variant_pages = OrderedDict()  # variant -> [page_indices]
-    current_page = 0
-
-    for variant, pc, _ in page_map:
-        if current_page >= combined_pages:
-            break
-        # Clamp page count to remaining pages
-        actual_pc = min(pc, combined_pages - current_page)
-        if variant not in variant_pages:
-            variant_pages[variant] = []
-        for i in range(actual_pc):
-            variant_pages[variant].append(current_page + i)
-        current_page += actual_pc
-
-    # Group variants for output:
-    # - 4x3 -> separate PDF
-    # - 4x6 -> separate PDF
-    # - 3x3, 3x2, magnet -> combined into one PDF
+    # Group PDFs by variant based on filename only
+    # 4x3 -> separate | 4x6 -> separate | 3x2, 3x3, magnet -> others
     groups = OrderedDict()
     groups["4x3"] = []
     groups["4x6"] = []
-    groups["others"] = []  # 3x3, 3x2, magnet
+    groups["others"] = []
 
-    # Track counts for naming
-    other_counts = OrderedDict()  # variant -> count for the "others" group
+    other_page_counts = OrderedDict()  # variant -> list of pdf files for naming
 
-    for variant, pages in variant_pages.items():
+    for pdf_file in individual_pdfs:
+        variant = _detect_variant(pdf_file.name)
         if variant == "4x3":
-            groups["4x3"].extend(pages)
+            groups["4x3"].append(pdf_file)
         elif variant == "4x6":
-            groups["4x6"].extend(pages)
+            groups["4x6"].append(pdf_file)
         else:
-            groups["others"].extend(pages)
-            other_counts[variant] = len(pages)
+            groups["others"].append(pdf_file)
+            other_page_counts.setdefault(variant, 0)
 
-    output_folder = folder  / "final_pdf_outputs"
+    # Create output folder
+    output_folder = folder / "final_pdf_outputs"
     output_folder.mkdir(exist_ok=True)
 
-
-
-    # Generate output PDFs
     output_files = []
+    total_pages = 0
 
-    for group_name, pages in groups.items():
-        if not pages:
+    for group_name, pdf_list in groups.items():
+        if not pdf_list:
             continue
 
+        # Merge all PDFs in this group (already in ascending name order)
+        out_doc = fitz.open()
+        group_pages = 0
 
+        for pdf_file in pdf_list:
+            try:
+                src = fitz.open(str(pdf_file))
+                pc = len(src)
+                out_doc.insert_pdf(src)
+                group_pages += pc
+                src.close()
+                # Track per-variant page counts for "others" naming
+                if group_name == "others":
+                    v = _detect_variant(pdf_file.name)
+                    other_page_counts[v] = other_page_counts.get(v, 0) + pc
+            except Exception as e:
+                out_doc.close()
+                return {"error": f"Failed to read {pdf_file.name}: {e}"}
 
+        # Build output filename
         if group_name == "4x3":
-            out_name = f"4x3-{len(pages)}.pdf"
+            out_name = f"4x3-{group_pages}pages.pdf"
         elif group_name == "4x6":
-            out_name = f"4x6-{len(pages)}.pdf"
+            out_name = f"4x6-{group_pages}pages.pdf"
         else:
             # others: 3x3-10_3x2-15_magnet-2
             parts = []
-            for v, c in other_counts.items():
-                parts.append(f"{v}-{c}")
-            out_name = "_".join(parts) + ".pdf" if parts else f"others-{len(pages)}.pdf"
+            for v, pc in other_page_counts.items():
+                if pc > 0:
+                    parts.append(f"{v}-{pc}")
+            out_name = "_".join(parts) + ".pdf" if parts else f"others-{group_pages}.pdf"
 
         out_path = output_folder / out_name
-
-        # Create new PDF with selected pages
-        out_doc = fitz.open()
-        # Pages are contiguous per group, use range extraction for speed
-        if pages:
-            start = pages[0]
-            end = pages[-1]
-            # Verify contiguous
-            if end - start + 1 == len(pages) and end < len(combined_doc):
-                out_doc.insert_pdf(combined_doc, from_page=start, to_page=end)
-            else:
-                # Fallback: page by page (if non-contiguous)
-                for page_idx in pages:
-                    if page_idx < len(combined_doc):
-                        out_doc.insert_pdf(combined_doc, from_page=page_idx, to_page=page_idx)
-
         out_doc.save(str(out_path), garbage=0, deflate=False)
         out_doc.close()
 
+        total_pages += group_pages
         output_files.append({
             "filename": out_name,
-            "pages": len(pages),
+            "pages": group_pages,
             "group": group_name,
+            "pdf_count": len(pdf_list),
         })
-
-    combined_doc.close()
-
-    # Remove the original combined PDF since we've split it
-    # try:
-    #     combined_path.unlink()
-    # except Exception:
-    #     pass
 
     return {
         "status": "ok",
         "output_files": output_files,
-        "total_pages": combined_pages,
-        # "original_removed": combined_path.name,
+        "total_pages": total_pages,
     }
 
 def split_pdf_half(pdf_path: str) -> dict:

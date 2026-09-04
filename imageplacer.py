@@ -142,6 +142,17 @@ LAYOUTS = {
     "frame_w_px": 1392, "frame_h_px": 1992,
     "rotate": False, "label_y": 0.25,
 },
+"poster_4x6": {
+        "label": "4x6 Poster (1 per page, full bleed)",
+        "cols": 1, "rows": 1, "max_images": 100,
+        "cell_w": 4.0, "cell_h": 6.0,
+        "grid_left": 0, "grid_bottom": 0,
+        "photo_w": 4.0, "photo_h": 6.0,
+        "offset_x": 0, "offset_y": 0,
+        "frame_w_px": 1200, "frame_h_px": 1800,
+        "rotate": False, "label_y": 0,
+        "is_poster": True,
+    },
 }
 
 def _apply_exif_orientation(img: Image.Image) -> Image.Image:
@@ -326,7 +337,7 @@ def _draw_cut_marks(c: canvas.Canvas, layout: dict, layout_key:str = "") -> None
         c.line(x, by - mark, x, by)
         c.line(x, ty, x, ty + mark)
     # Inner cut marks for 3x3 and 3x2 variants
-    if layout_key.startswith("3x3") or layout_key.startswith("3x2"):
+    if layout_key.startswith("3x3") or layout_key.startswith("3x2") or layout_key.startswith("magnet"):
         c.setStrokeColor(INNER_CUT_MARK_COLOR)
         c.setLineWidth(INNER_CUT_MARK_THICKNESS)
     # Interior intersections: small cross marks
@@ -398,6 +409,72 @@ offsets: list[dict] | None = None) -> None:
         _draw_order_label(c, order_name, layout["label_y"])
         c.save()
     
+    finally:
+        for f in tmp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
+
+
+
+
+POSTER_W = 4.0   # inches
+POSTER_H = 6.0   # inches
+POSTER_DPI = 300
+POSTER_PX_W = round(POSTER_W * POSTER_DPI) # 1200
+POSTER_PX_H = round(POSTER_H * POSTER_DPI) # 1800
+
+def generate_poster_pdf(image_paths: list[str], output_path: str,
+                        offsets: list[dict] | None = None) -> None:
+    """Generate a multi-page PDF with one image per 4x6 inch page (CMYK, full bleed)."""
+    tmp_dir = tempfile.mkdtemp(prefix="basa_poster_")
+    tmp_files: list[str] = []
+
+    try:
+        c = canvas.Canvas(output_path, pagesize=(POSTER_W * inch, POSTER_H * inch))
+
+        for idx, src in enumerate(image_paths):
+            try:
+                img = Image.open(src)
+                img = _apply_exif_orientation(img)
+                img = _flatten_alpha(img)
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+
+                off = (offsets[idx] if offsets and idx < len(offsets)
+                       else {"x": 0.5, "y": 0.5, "zoom": 1.0, "rotation": 0})
+
+                rotation = int(off.get("rotation", 0)) % 360
+                if rotation in (90, 180, 270):
+                    img = img.rotate(-rotation, expand=True)
+
+                # Fill the entire 4x6 frame with user offsets
+                img = _fill_frame(img, POSTER_PX_W, POSTER_PX_H,
+                                  off.get("x", 0.5), off.get("y", 0.5),
+                                  off.get("zoom", 1.0))
+
+                # Convert to CMYK
+                img = convert_to_cmyk_properly(img)
+
+                tmp_path = os.path.join(tmp_dir, f"poster_{idx:04d}.jpg")
+                img.save(tmp_path, "JPEG", quality=JPEG_QUALITY)
+                tmp_files.append(tmp_path)
+
+                # Draw image filling the entire page (no margins)
+                c.drawImage(tmp_path, 0, 0,
+                            width=POSTER_W * inch, height=POSTER_H * inch)
+                c.showPage()
+
+            except Exception:
+                log.exception("Skipping corrupted image in poster: %s", src)
+
+        c.save()
+
     finally:
         for f in tmp_files:
             try:
@@ -512,9 +589,21 @@ def generate():
 
         if not saved_paths:
             return jsonify({"error": "Failed to save uploaded files"}), 500
+        import json
+        offsets = None
+        offsets_raw = request.form.get("offsets", "")
+        if offsets_raw:
+            try:
+                offsets = json.loads(offsets_raw)
+            except (json.JSONDecodeError, TypeError):
+                offsets = None
 
         pdf_path = os.path.join(work_dir, f"{order_name}.pdf")
-        generate_pdf(saved_paths, pdf_path, order_name, layout,layout_key)
+    
+        if layout.get("is_poster"):
+            generate_poster_pdf(saved_paths, pdf_path, offsets)
+        else:
+            generate_pdf(saved_paths, pdf_path, order_name, layout, offsets=offsets)
         buf = io.BytesIO()
         with open(pdf_path,"rb") as f:
             buf.write(f.read())

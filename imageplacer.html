@@ -196,7 +196,7 @@
                 </select>
                 <div class="info-text" id="maxInfo">Max 18 photos for this layout</div>
             </div>
-
+<script type="application/json" id="layoutData">{{ layouts | tojson }}</script>
             <div class="card">
                 <div class="step-label">Step 2 &mdash; Order Name</div>
                 <label for="orderName">Order / Folder Name</label>
@@ -227,7 +227,53 @@
             <div class="error-msg" id="errorMsg"></div>
             <div class="success-msg" id="successMsg"></div>
         </form>
+
+
+        <div class="card" id="previewCard" style="display:none;">
+        <div class="step-label">Step 4 &mdash; Adjust Photos (Drag to reposition, scroll to zoom)</div>
+        <div id="previewGrid" style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center;"></div>
     </div>
+    </div>
+
+    <style>
+        .preview-cell {
+            position: relative;
+            overflow: hidden;
+            border: 2px solid #1a1a2e;
+            border-radius: 6px;
+            cursor: grab;
+            background: #111;
+            touch-action: none;
+        }
+        .preview-cell:active { cursor: grabbing; }
+        .preview-cell img {
+            position: absolute;
+            top: 0; left: 0;
+            user-select: none;
+            -webkit-user-drag: none;
+            pointer-events: none;
+        }
+        .preview-controls {
+            position: absolute;
+            bottom: 4px; right: 4px;
+            display: flex; gap: 4px;
+            z-index: 10;
+        }
+        .preview-controls button {
+            width: 26px; height: 26px;
+            border: none; border-radius: 50%;
+            background: rgba(26,26,46,0.85);
+            color: #fff; font-size: 14px;
+            cursor: pointer; display: flex;
+            align-items: center; justify-content: center;
+        }
+        .preview-controls button:hover { background: rgba(26,26,46,1); }
+        .preview-index {
+            position: absolute; top: 4px; left: 4px;
+            background: rgba(26,26,46,0.8); color: #fff;
+            font-size: 11px; padding: 2px 7px; border-radius: 4px;
+        }
+    </style>
 
     <script>
         const layoutSelect = document.getElementById('layout');
@@ -242,18 +288,36 @@
         const statusText = document.getElementById('statusText');
         const errorMsg = document.getElementById('errorMsg');
         const successMsg = document.getElementById('successMsg');
+const previewCard = document.getElementById('previewCard');
+    const previewGrid = document.getElementById('previewGrid');
 
-        function getMaxImages() {
-            return parseInt(layoutSelect.selectedOptions[0].dataset.max);
-        }
+    // Layout data from server
+    const LAYOUTS = JSON.parse(document.getElementById('layoutData').textContent);
 
-        layoutSelect.addEventListener('change', () => {
-            maxInfo.textContent = `Max ${getMaxImages()} photos for this layout`;
-            validateFileCount();
-        });
+    // Per-image offset state
+    let imageOffsets = [];
 
-        imageInput.addEventListener('change', validateFileCount);
+    function getMaxImages() {
+        return parseInt(layoutSelect.selectedOptions[0].dataset.max);
+    }
 
+    function getLayoutInfo() {
+        const l = LAYOUTS[layoutSelect.value];
+        return { w: l.frame_w_px, h: l.frame_h_px, is_poster: l.is_poster || false };
+    }
+
+    layoutSelect.addEventListener('change', () => {
+        const max = getMaxImages();
+        maxInfo.textContent = 'Max ' + max + ' photos for this layout';
+        document.getElementById('maxPhotosLabel').textContent = max;
+        validateFileCount();
+        buildPreviews();
+    });
+
+    imageInput.addEventListener('change', () => {
+        validateFileCount();
+        buildPreviews();
+    });
         function validateFileCount() {
             const max = getMaxImages();
             const count = imageInput.files.length;
@@ -280,7 +344,173 @@
         ['dragleave', 'drop'].forEach(e => {
             uploadArea.addEventListener(e, () => uploadArea.classList.remove('dragover'));
         });
+// --- Preview builder
+        function buildPreviews() {
+            previewGrid.innerHTML = '';
+            const files = imageInput.files;
+            if (!files || files.length === 0) {
+                previewCard.style.display = 'none';
+                imageOffsets = [];
+                return;
+            }
 
+            const la = getLayoutAspect();
+            // Preview cell size (fit in container)
+            const CELL_W = la.is_poster ? 140 : 120;
+            const aspect = la.h / la.w;
+            const CELL_H = Math.round(CELL_W * aspect);
+
+            imageOffsets = [];
+            previewCard.style.display = 'block';
+
+            Array.from(files).forEach((file, idx) => {
+                imageOffsets.push({ x: 0.5, y: 0.5, zoom: 1.0, rotation: 0 });
+
+                const cell = document.createElement('div');
+                cell.className = 'preview-cell';
+                cell.style.width = CELL_W + 'px';
+                cell.style.height = CELL_H + 'px';
+                cell.dataset.idx = idx;
+
+                const indexLabel = document.createElement('div');
+                indexLabel.className = 'preview-index';
+                indexLabel.textContent = idx + 1;
+                cell.appendChild(indexLabel);
+
+                const img = document.createElement('img');
+                img.dataset.idx = idx;
+                const url = URL.createObjectURL(file);
+                img.onload = () => positionImage(cell, img, idx);
+                img.src = url;
+                cell.appendChild(img);
+
+                // Controls
+                const controls = document.createElement('div');
+                controls.className = 'preview-controls';
+                const zoomIn = document.createElement('button');
+                zoomIn.textContent = '+';
+                zoomIn.title = 'Zoom in';
+                zoomIn.onclick = (e) => { e.stopPropagation(); adjustZoom(idx, 0.1, cell, img); };
+                const zoomOut = document.createElement('button');
+                zoomOut.textContent = '-';
+                zoomOut.title = 'Zoom out';
+                zoomOut.onclick = (e) => { e.stopPropagation(); adjustZoom(idx, -0.1, cell, img); };
+                const rotateBtn = document.createElement('button');
+                rotateBtn.textContent = '↻';
+                rotateBtn.title = 'Rotate 90°';
+                rotateBtn.onclick = (e) => { e.stopPropagation(); adjustRotation(idx, cell, img); };
+                controls.appendChild(zoomOut);
+                controls.appendChild(zoomIn);
+                controls.appendChild(rotateBtn);
+                cell.appendChild(controls);
+
+                setupDrag(cell, img, idx);
+
+                // Scroll zoom
+                cell.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+                    adjustZoom(idx, delta, cell, img);
+                }, { passive: false });
+
+                previewGrid.appendChild(cell);
+            });
+        }
+
+        function positionImage(cell, img, idx) {
+            const off = imageOffsets[idx];
+            const cellW = cell.offsetWidth;
+            const cellH = cell.offsetHeight;
+            const natW = img.naturalWidth;
+            const natH = img.naturalHeight;
+
+            // Scale to cover the cell
+            const baseScale = Math.max(cellW / natW, cellH / natH);
+            const scale = baseScale * off.zoom;
+            const imgW = natW * scale;
+            const imgH = natH * scale;
+
+            img.style.width = imgW + 'px';
+            img.style.height = imgH + 'px';
+
+            // Position based on offset (0-1)
+            const maxX = imgW - cellW;
+            const maxY = imgH - cellH;
+            img.style.left = -(maxX * off.x) + 'px';
+            img.style.top = -(maxY * off.y) + 'px';
+        }
+
+        function adjustZoom(idx, delta, cell, img) {
+            const off = imageOffsets[idx];
+            off.zoom = Math.max(1.0, Math.min(3.0, off.zoom + delta));
+            positionImage(cell, img, idx);
+        }
+
+        function adjustRotation(idx, cell, img) {
+            const off = imageOffsets[idx];
+            off.rotation = (off.rotation + 90) % 360;
+            // Apply CSS rotation for visual preview
+            img.style.transform = `rotate(${off.rotation}deg)`;
+            positionImage(cell, img, idx);
+        }
+
+        function setupDrag(cell, img, idx) {
+            let dragging = false;
+            let startX, startY, startOffX, startOffY;
+
+            const onStart = (ex, ey) => {
+                dragging = true;
+                startX = ex;
+                startY = ey;
+                startOffX = imageOffsets[idx].x;
+                startOffY = imageOffsets[idx].y;
+            };
+
+            const onMove = (ex, ey) => {
+                if (!dragging) return;
+                const cellW = cell.offsetWidth;
+                const cellH = cell.offsetHeight;
+                const natW = img.naturalWidth;
+                const natH = img.naturalHeight;
+                const baseScale = Math.max(cellW / natW, cellH / natH);
+                const scale = baseScale * imageOffsets[idx].zoom;
+                const imgW = natW * scale;
+                const imgH = natH * scale;
+                const maxX = imgW - cellW;
+                const maxY = imgH - cellH;
+
+                if (maxX > 0) {
+                    const dx = ex - startX;
+                    imageOffsets[idx].x = Math.max(0, Math.min(1, startOffX - dx / maxX));
+                }
+                if (maxY > 0) {
+                    const dy = ey - startY;
+                    imageOffsets[idx].y = Math.max(0, Math.min(1, startOffY - dy / maxY));
+                }
+                positionImage(cell, img, idx);
+            };
+
+            const onEnd = () => { dragging = false; };
+
+            // Mouse
+            cell.addEventListener('mousedown', (e) => { e.preventDefault(); onStart(e.clientX, e.clientY); });
+            document.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+            document.addEventListener('mouseup', onEnd);
+
+            // Touch
+            cell.addEventListener('touchstart', (e) => {
+                const t = e.touches[0];
+                onStart(t.clientX, t.clientY);
+            }, { passive: true });
+            cell.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const t = e.touches[0];
+                onMove(t.clientX, t.clientY);
+            }, { passive: false });
+            cell.addEventListener('touchend', onEnd);
+        }
+
+        // --- Form submission
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorMsg.style.display = 'none';
@@ -304,6 +534,10 @@
             statusText.textContent = 'Uploading & processing...';
 
             const formData = new FormData(form);
+
+            if(imageOffsets.length > 0){
+                formData.append('offsets', JSON.stringify(imageOffsets));
+            }
 
             try {
                 progressFill.style.width = '30%';
