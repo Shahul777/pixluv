@@ -27,7 +27,7 @@ SETTING_BASE_FOLDER = "amazon_download_base_folder"
 BROWSER_DATA_DIR = Path(__file__).parent / ".amazon_browser_data"
 SELLER_CENTRAL_URL = "https://sellercentral.amazon.in"
 ORDERS_URL = f"{SELLER_CENTRAL_URL}/orders-v3/ref=xx_myo_favb_xx?page=1"
-
+_SHIP_FOLDER_RE = re.compile(r"ship.*image",re.IGNORECASE)
 # --- Progress infrastructure --------------------------------------------------
 _pq: dict[str, queue.Queue] = {}
 _pq_lock = threading.Lock()
@@ -1591,6 +1591,22 @@ def ad_set_base_folder():
     log_activity("amazon_download", "set_base_folder", str(p))
     return jsonify({"status": "ok", "folder": str(p)})
     
+
+@amazon_bp.route("/amazon-download/ship-folders", methods=["GET"])
+def ad_list_ship_folders():
+    base = get_setting(SETTING_BASE_FOLDER, "")
+    if not base or not Path(base).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    folders = []
+    for d in sorted(Path(base).iterdir(), key=lambda x: x.name.lower()):
+        if d.is_dir() and _SHIP_FOLDER_RE.search(d.name):
+            order_count = sum(1 for sub in d.iterdir() if sub.is_dir())
+            folders.append({"name": d.name, "path": str(d),
+                            "order_count": order_count})
+
+    return jsonify({"folders": folders})
+
 @amazon_bp.route("/amazon-download/browser-status", methods=["GET"])
 def ad_browser_status():
     """Check if the browser is running and logged in."""
@@ -1662,7 +1678,7 @@ def ad_close_browser():
 def ad_start():
     """Start the order download process.
     
-    Body JSON: {"ship_day": "Wed"}
+    Body JSON: {"ship_day": "Wed", "ship_folder": "<path>"}
     """
     data = request.get_json(silent=True) or {}
     ship_day = data.get("ship_day", "").strip()
@@ -1675,16 +1691,37 @@ def ad_start():
     base_folder = get_setting(SETTING_BASE_FOLDER, "")
     if not base_folder or not Path(base_folder).is_dir():
         return jsonify({"error": "Base folder not set or not found."}), 400
-        
+
+
+    # base_folder = get_setting(SETTING_BASE_FOLDER, "")
+    # if not base_folder or not Path(base_folder).is_dir():
+    #     return jsonify({"error": "Base folder not set or not found."}), 400
+
+    ship_folder = (data.get("ship_folder") or "").strip()
+    if not ship_folder:
+        return jsonify({"error": "Select a ship folder."}), 400
+
+    target = Path(os.path.normpath(ship_folder)).resolve()
+    base_resolved = Path(base_folder).resolve()
+    if base_resolved not in target.parents:
+        return jsonify({"error": "Ship folder must be inside the base folder."}), 400
+    if not target.is_dir():
+        return jsonify({"error": f"Folder not found: {ship_folder}"}), 400
+
     task_id = f"amz_{int(time.time() * 1000)}"
     _new_q(task_id)
-    
+
     thread = threading.Thread(
-        target=_run_download, args=(base_folder, ship_day, task_id), daemon=True
+        target=_run_download, args=(str(target), ship_day, task_id), daemon=True,
     )
+
+
+
+
+ 
     thread.start()
     
-    return jsonify({"task_id": task_id, "ship_day": ship_day})
+    return jsonify({"task_id": task_id, "ship_day": ship_day, "ship_folder": str(target)})
     
 @amazon_bp.route("/amazon-download/progress/<task_id>")
 def ad_progress(task_id: str):

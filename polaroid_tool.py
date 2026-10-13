@@ -5,7 +5,7 @@ import zipfile
 import tempfile
 import zipfile
 import fitz
-from PIL import Image
+from PIL import Image, ImageOps
 import math
 import os
 import queue
@@ -15,9 +15,10 @@ import time
 from pathlib import Path
 import tempfile
 from natsort import natsorted
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, jsonify, request , send_file
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import get_setting, set_setting, log_activity
+import uuid
 
 # --- Import image-placement engine from imageplacer.py ---
 from imageplacer import (LAYOUTS, SUPPORTED_EXTENSIONS, generate_pdf,generate_poster_pdf,prepare_preview,PAGE_W,PAGE_H)
@@ -787,7 +788,7 @@ def confirm_preview(task_id: str):
 _log = logging.getLogger("extract-image")
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".heic", ".heif", ".webp" , ".dng"}
 
-_OCR_KEYWORDS = re.compile(r"(Note\s*:|PIXLUV|contact)", re.IGNORECASE)
+_OCR_KEYWORDS = re.compile(r"(Note\s*:|PIXLUV|contact|\bOrder\b|#\s*OD)", re.IGNORECASE)
 
 _ocr_engine = None
 _OCR_SKIP_SIZE = 60 * 1024  # skip files > 100KB (real photos, not promo cards)
@@ -1045,7 +1046,36 @@ def _run_extract_images(ship_folder_path: str, task_id: str):
 
         report_lines.append("-" * 70)
         report_lines.append(f"{'TOTAL':<45} {'':<12} {total_images:>8}")
+
         report_lines.append("")
+
+    # Orders whose photo count doesn't fill complete sets of 9
+        odd_counts = []
+        for res in results:
+            cnt = res["final_count"]
+            if cnt % 9 != 0:
+                odd_counts.append({
+                "folder": res["folder"],
+                "order_id": res["order_id"],
+                "count": cnt,
+                "remainder": cnt % 9,
+                "short_by": 9 - (cnt % 9),
+            })
+        if odd_counts:
+            report_lines.append("⚠ PHOTO COUNT NOT A MULTIPLE OF 9:")
+            report_lines.append("-" * 70)
+            report_lines.append(
+            f"{'Order Folder':<45} {'Order ID':<12} {'Images':>7} {'Short By':>9}"
+        )
+            for o in odd_counts:
+                report_lines.append(
+                f"{o['folder']:<45} {o['order_id']:<12} "
+                f"{o['count']:>7} {o['short_by']:>9}"
+            )
+            report_lines.append("-" * 70)
+            report_lines.append(f"Orders needing attention: {len(odd_counts)}")
+        
+            report_lines.append("")
      
         oid_to_folders: dict[str, list[str]] = {}
         for res in results:
@@ -1114,6 +1144,8 @@ def _run_extract_images(ship_folder_path: str, task_id: str):
                   "zips_extracted": orders_with_zip,
                   "files_deleted": total_deleted,
                   "ocr_removed": total_ocr_removed,
+                  "non_multiple_9" : odd_counts,
+                  "not_multiple_9_count": len(odd_counts),
                   "report_path": str(report_path),
                   "elapsed": elapsed,
               })
@@ -1168,8 +1200,221 @@ def extract_progress(task_id: str):
                     headers={"Cache-Control": "no-cache",
                              "X-Accel-Buffering": "no"})
                              
-                             
-                             
+
+
+# Order-folder suffix -> destination folder name (created in the base folder)
+_SORT_DESTINATIONS = {
+    "magnet": "magnet",
+    "3x2": "3x2",
+    "4x6": "ship-4-6-image",
+}
+
+# Suffix must be the whole name or follow a separator, so "13x2" won't match
+_SORT_SUFFIX_RE = re.compile(r"(?:^|[-_ ])(3x2|4x6|magnet)\s*$", re.IGNORECASE)
+
+# Destinations whose order folders get sequential letter-based image names
+_LETTER_RENAME_DESTS = ("magnet", "3x2")
+
+
+def _sort_destination_for(folder_name: str) -> str | None:
+    m = _SORT_SUFFIX_RE.search(folder_name.strip())
+    return _SORT_DESTINATIONS[m.group(1).lower()] if m else None
+
+
+def _letter_label(idx: int) -> str:
+    """0 -> a, 25 -> z, 26 -> aa, 27 -> ab ..."""
+    label = ""
+    idx += 1
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        label = chr(97 + rem) + label
+    return label
+
+
+def _unique_path(target: Path, is_dir: bool = False) -> Path:
+    if not target.exists():
+        return target
+    stem, suffix = (target.name, "") if is_dir else (target.stem, target.suffix)
+    n = 2
+    while True:
+        cand = target.with_name(f"{stem}_{n}{suffix}")
+        if not cand.exists():
+            return cand
+        n += 1
+
+
+def _letter_rename_folder(root: Path) -> list[dict]:
+    """Rename images inside each order folder of *root* to a(1), a(2), b(1)..."""
+    renamed = []
+    order_dirs = natsorted([d for d in root.iterdir() if d.is_dir()],
+                           key=lambda p: p.name.lower())
+    seq = 0
+    for order_dir in order_dirs:
+        images = natsorted([f for f in order_dir.iterdir()
+                            if f.is_file() and _is_image_file(f)],
+                           key=lambda p: p.name.lower())
+        if not images:
+            continue
+        letter = _letter_label(seq)
+        seq += 1
+        # Two-phase rename so existing names can't collide with new ones
+        staged = []
+        for img in images:
+            tmp = order_dir / f"__tmp_{uuid.uuid4().hex[:8]}{img.suffix.lower()}"
+            img.rename(tmp)
+            staged.append(tmp)
+        for n, tmp in enumerate(staged, start=1):
+            tmp.rename(_unique_path(order_dir / f"{letter}({n}){tmp.suffix}"))
+        renamed.append({"folder": order_dir.name, "letter": letter,
+                        "images": len(staged)})
+    return renamed
+
+
+@polaroid_bp.route("/polaroid/sort-variants", methods=["POST"])
+def sort_variants():
+    """Move 3x2 / 4x6 / magnet order folders out of the selected ship folder
+    into sibling category folders, then letter-rename magnet & 3x2 images."""
+    data = request.get_json(silent=True) or {}
+    ship_folder = data.get("ship_folder", "").strip()
+    if not ship_folder:
+        return jsonify({"error": "ship_folder is required."}), 400
+
+    ship = Path(os.path.normpath(ship_folder))
+    if not ship.is_dir():
+        return jsonify({"error": f"Folder not found: {ship_folder}"}), 400
+
+    base = ship.parent
+    moved: list[dict] = []
+    failed: list[dict] = []
+    
+    for order_dir in sorted([d for d in ship.iterdir() if d.is_dir()],
+                            key=lambda p: p.name.lower()):
+        dest_name = _sort_destination_for(order_dir.name)
+        if not dest_name:
+            continue
+        dest_root = base / dest_name
+        try:
+            dest_root.mkdir(exist_ok=True)
+            target = _unique_path(dest_root / order_dir.name, is_dir=True)
+            shutil.move(str(order_dir), str(target))
+            moved.append({"folder": order_dir.name, "category": dest_name,
+                          "dest": str(target)})
+        except Exception as exc:
+            log.exception("Sort move failed for %s", order_dir)
+            failed.append({"folder": order_dir.name, "error": str(exc)})
+
+    renamed: dict[str, list[dict]] = {}
+    for dest_name in _LETTER_RENAME_DESTS:
+        dest_root = base / dest_name
+        if not dest_root.is_dir():
+            continue
+        try:
+            renamed[dest_name] = _letter_rename_folder(dest_root)
+        except Exception as exc:
+            log.exception("Letter rename failed for %s", dest_root)
+            failed.append({"folder": dest_name, "error": str(exc)})
+
+    log_activity("polaroid", "sort_variants", json.dumps({
+        "ship_folder": str(ship), "moved": len(moved), "failed": len(failed),
+    }))
+
+    counts = {dest: sum(1 for m in moved if m["category"] == dest)
+              for dest in _SORT_DESTINATIONS.values()}
+    return jsonify({
+        "ok": True,
+        "base_folder": str(base),
+        "moved": moved,
+        "moved_count": len(moved),
+        "counts": counts,
+        "renamed": renamed,
+        "renamed_count": sum(len(v) for v in renamed.values()),
+        "failed": failed,
+    })
+
+
+# ========================== BASE FOLDER RESET (recycle bin) ==========================
+
+_RESET_FIXED_FOLDERS = ["3x2", "magnet", "ship-1-1-image",
+                        "ship-3-3-image", "ship-4-6-image"]
+
+def _send_to_recycle_bin(paths: list[Path]) -> None:
+    """Move paths to the Windows Recycle Bin via SHFileOperationW."""
+    if not paths:
+        return
+    if os.name != "nt":
+        raise OSError("Recycle bin deletion is only supported on Windows.")
+
+    import ctypes
+    from ctypes import wintypes
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_uint),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    FO_DELETE = 3
+    FOF_SILENT = 0x0004
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_ALLOWUNDO = 0x0040
+    FOF_NOERRORUI = 0x0400
+
+    src = "\0".join(os.path.abspath(str(p)) for p in paths) + "\0\0"
+    op = SHFILEOPSTRUCTW(
+        None, FO_DELETE, src, None,
+        FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI,
+        False, None, None,
+    )
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+    if result != 0:
+        raise OSError(f"Recycle bin delete failed (code {result}).")
+    if op.fAnyOperationsAborted:
+        raise OSError("Recycle bin delete was aborted.")
+
+
+@polaroid_bp.route("/polaroid/reset-base", methods=["POST"])
+def reset_base_folder():
+    """Recycle everything inside the base folder, then recreate the
+    5 fixed category folders plus ship-<n1>-<n2>-image."""
+    data = request.get_json(silent=True) or {}
+    base_str = get_setting(SETTING_BASE_FOLDER, "")
+    if not base_str or not Path(base_str).is_dir():
+        return jsonify({"error": "Base folder not set or not found."}), 400
+
+    try:
+        n1 = int(str(data.get("n1", "")).strip())
+        n2 = int(str(data.get("n2", "")).strip())
+    except ValueError:
+        return jsonify({"error": "Both ship-folder numbers are required."}), 400
+    if not (0 <= n1 <= 999 and 0 <= n2 <= 999):
+        return jsonify({"error": "Numbers must be between 0 and 999."}), 400
+
+    base = Path(base_str)
+    children = list(base.iterdir())
+    try:
+        _send_to_recycle_bin(children)
+    except Exception as exc:
+        log.exception("Base folder reset failed")
+        return jsonify({"error": str(exc)}), 500
+
+    created = _RESET_FIXED_FOLDERS + [f"ship-{n1}-{n2}-image"]
+    for name in created:
+        (base / name).mkdir(exist_ok=True)
+
+    log_activity("polaroid", "reset_base_folder", json.dumps({
+        "base": str(base), "recycled": len(children), "created": created,
+    }))
+
+    return jsonify({"ok": True, "base_folder": str(base),
+                    "recycled": len(children), "created": created})
+
+# ========================== WHATSAPP CHAT IMPORT ==========================                                                         
 # Regex to match WhatsApp exported chat lines (various date/time formats)
 _WA_MSG_RE = re.compile(
     r"^\[?\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s+\d{1,2}[:.]\d{2}"
@@ -1280,3 +1525,171 @@ def _find_media_file(base_dir: str, filename: str) -> str | None:
             if f == filename or f.lower() == filename.lower():
                 return os.path.join(root, f)
     return None
+_gallery_lock = threading.Lock()
+_gallery_sessions: dict[str, dict] = {}
+_GALLERY_TTL = 6 * 3600         # drop a scan after 6 hours
+_GALLERY_MAX_SESSIONS = 12
+
+_THUMB_DIR = os.path.join(tempfile.gettempdir(), "basa_gallery_thumbs")
+os.makedirs(_THUMB_DIR, exist_ok=True)
+
+_THUMB_PX = 360     # grid tile longest edge
+_FULL_PX = 1600     # lightbox longest edge
+
+
+def _gallery_prune_locked() -> None:
+    now = time.time()
+    for sid in [s for s, v in _gallery_sessions.items()
+                if now - v["created"] > _GALLERY_TTL]:
+        _gallery_sessions.pop(sid, None)
+    while len(_gallery_sessions) > _GALLERY_MAX_SESSIONS:
+        oldest = min(_gallery_sessions, key=lambda k: _gallery_sessions[k]["created"])
+        _gallery_sessions.pop(oldest, None)
+
+
+def _gallery_resolve(scan_id: str, fid: str) -> Path | None:
+    """Map an opaque file id back to its path, rejecting anything outside the scan root."""
+    with _gallery_lock:
+        sess = _gallery_sessions.get(scan_id)
+        raw = sess["files"].get(fid) if sess else None
+        root = sess["root"] if sess else None
+    if not raw:
+        return None
+    p = Path(raw)
+    try:
+        p.resolve().relative_to(Path(root).resolve())
+    except (ValueError, OSError):
+        return None
+    return p
+
+
+def _gallery_preview(src: Path, max_px: int) -> str | None:
+    """Return a cached downscaled JPEG for `src`, generating it on first use."""
+    try:
+        st = src.stat()
+    except OSError:
+        return None
+    key = f"{abs(hash((str(src.resolve()), int(st.st_mtime), st.st_size)))}_{max_px}.jpg"
+    cache_path = os.path.join(_THUMB_DIR, key)
+    if os.path.exists(cache_path):
+        return cache_path
+    try:
+        img = Image.open(src)
+        img = ImageOps.exif_transpose(img)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.thumbnail((max_px, max_px), Image.Resampling.LANCZOS)
+        img.save(cache_path, "JPEG", quality=72, optimize=True)
+        return cache_path
+    except Exception as exc:
+        log.warning("Gallery preview failed for %s: %s", src, exc)
+        return None
+
+
+@polaroid_bp.route("/polaroid/gallery-scan", methods=["POST"])
+def gallery_scan():
+    """Index every photo inside each order folder of a ship-date-image folder."""
+    data = request.get_json(silent=True) or {}
+    ship_folder = (data.get("ship_folder") or "").strip()
+    if not ship_folder:
+        return jsonify({"error": "ship_folder is required."}), 400
+
+    root = Path(os.path.normpath(ship_folder))
+    if not root.is_dir():
+        return jsonify({"error": f"Folder not found: {ship_folder}"}), 400
+
+    scan_id = uuid.uuid4().hex
+    files: dict[str, str] = {}
+    orders: list[dict] = []
+
+    try:
+        order_dirs = [d for d in sorted(root.iterdir(), key=lambda x: x.name.lower())
+                      if d.is_dir() and d.name.lower() != "whatsapp"]
+    except OSError as exc:
+        return jsonify({"error": f"Cannot read folder: {exc}"}), 400
+
+    for d in order_dirs:
+        try:
+            imgs = natsorted([f for f in d.iterdir() if _is_image_file(f)],
+                             key=lambda x: x.name.lower())
+        except OSError:
+            continue
+        if not imgs:
+            continue
+        entries = []
+        for f in imgs:
+            fid = uuid.uuid4().hex[:16]
+            files[fid] = str(f)
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = 0
+            entries.append({"id": fid, "name": f.name, "size": size})
+        orders.append({
+            "folder": d.name,
+            "order_id": _extract_order_id(d.name) or "",
+            "count": len(entries),
+            "files": entries,
+        })
+
+    with _gallery_lock:
+        _gallery_sessions[scan_id] = {
+            "root": str(root), "files": files, "created": time.time(),
+        }
+        _gallery_prune_locked()
+
+    return jsonify({
+        "scan_id": scan_id,
+        "ship_folder": root.name,
+        "orders": orders,
+        "total_orders": len(orders),
+        "total_photos": len(files),
+    })
+
+
+@polaroid_bp.route("/polaroid/gallery-thumb/<scan_id>/<fid>")
+def gallery_thumb(scan_id: str, fid: str):
+    src = _gallery_resolve(scan_id, fid)
+    if src is None or not src.is_file():
+        return jsonify({"error": "Not found"}), 404
+    size = _FULL_PX if request.args.get("full") == "1" else _THUMB_PX
+    out = _gallery_preview(src, size)
+    if out is None:
+        return jsonify({"error": "Preview failed"}), 500
+    return send_file(out, mimetype="image/jpeg", conditional=True)
+
+
+@polaroid_bp.route("/polaroid/gallery-delete", methods=["POST"])
+def gallery_delete():
+    """Permanently delete the selected photos from their order folders."""
+    data = request.get_json(silent=True) or {}
+    scan_id = (data.get("scan_id") or "").strip()
+    ids = data.get("ids") or []
+    if not scan_id or not isinstance(ids, list) or not ids:
+        return jsonify({"error": "scan_id and ids are required."}), 400
+
+    deleted, failed = [], []
+    for fid in ids:
+        src = _gallery_resolve(scan_id, str(fid))
+        if src is None:
+            failed.append({"id": fid, "reason": "not in this scan"})
+            continue
+        try:
+            src.unlink()
+            deleted.append(fid)
+            log.info("Gallery deleted: %s", src)
+        except FileNotFoundError:
+            deleted.append(fid)    # already gone - treat as success
+        except OSError as exc:
+            failed.append({"id": fid, "reason": str(exc)})
+
+    if deleted:
+        with _gallery_lock:
+            sess = _gallery_sessions.get(scan_id)
+            if sess:
+                for fid in deleted:
+                    sess["files"].pop(fid, None)
+            log_activity("polaroid", "gallery_delete", f"{len(deleted)} photo(s)")
+
+    return jsonify({"ok": True, "deleted": deleted,
+                    "deleted_count": len(deleted), "failed": failed})

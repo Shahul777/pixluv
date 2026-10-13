@@ -1788,6 +1788,68 @@ def fl_process():
 
 from pdf_handler import split_combined_pdf, split_pdf_half,merge_pdfs
 
+_file_dialog_lock = threading.Lock()
+
+def _native_pick_pdf(multiple: bool) -> list[str]:
+    """Open a native file-open dialog on the host and return selected paths."""
+    picked: list[str] = []
+    failure: list[str] = []
+
+    def _run():
+        root = None
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            root.update()
+            kwargs = {
+                "parent": root,
+                "title": "Select PDF file" + ("s" if multiple else ""),
+                "filetypes": [("PDF files", "*.pdf"), ("All files", "*.*")],
+            }
+            if multiple:
+                picked.extend(list(filedialog.askopenfilenames(**kwargs) or ()))
+            else:
+                sel = filedialog.askopenfilename(**kwargs)
+                if sel:
+                    picked.append(sel)
+        except Exception as exc:
+            failure.append(str(exc))
+        finally:
+            if root is not None:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+
+    # Tk must own its thread; Flask worker threads can't be reused for it
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=300)
+
+    if failure:
+        raise RuntimeError(failure[0])
+    return [os.path.normpath(p) for p in picked]
+
+@app.route("/pick-pdf", methods=["POST"])
+def pick_pdf():
+    """Show the OS file picker so the user can choose PDFs without typing paths."""
+    data = request.get_json(silent=True) or {}
+    multiple = bool(data.get("multiple"))
+
+    if not _file_dialog_lock.acquire(blocking=False):
+        return jsonify({"error": "A file dialog is already open."}), 409
+    try:
+        paths = _native_pick_pdf(multiple)
+    except Exception as exc:
+        return jsonify({"error": f"File picker unavailable: {exc}"}), 500
+    finally:
+        _file_dialog_lock.release()
+
+    return jsonify({"paths": paths, "cancelled": not paths})
 
 @app.route("/pdf-handler/split", methods=["POST"])
 def pdf_handler_split():

@@ -505,6 +505,10 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
                 <input type="text" class="form-input" id="phSplitFile" placeholder="C:\Users\you\Desktop\Orders\ship-output\40-combined-10.pdf">
             </div>
             <div>
+  <button class="btn btn-outline ph-browse-btn" data-target="phSplitFile"
+    style="padding:10px 16px;" title="Choose a PDF from your computer">&#128193; Browse</button>
+</div>
+            <div>
                 <button id="phSplitBtn" class="btn btn-primary">&#9986; Split</button>
             </div>
         </div>
@@ -536,6 +540,11 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
             <label for="phHalfFile">PDF Path</label>
             <input type="text" class="form-input" id="phHalfFile" placeholder="C:\Users\you\path\to\file.pdf">
         </div>
+
+        <div>
+  <button class="btn btn-outline ph-browse-btn" data-target="phHalfFile"
+    style="padding:10px 16px;" title="Choose a PDF from your computer">&#128193; Browse</button>
+</div>
         <div>
             <button id="phHalfBtn" class="btn btn-primary">&#9986; Split Half</button>
         </div>
@@ -570,12 +579,22 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
                     <label>PDF 1 (target)</label>
                     <input type="text" class="form-input ph-merge-input" placeholder="C:\path\to\first.pdf">
                 </div>
+
+                <div>
+  <button class="btn btn-outline ph-row-browse-btn" style="padding:8px 14px;"
+    title="Choose a PDF from your computer">&#128193;</button>
+</div>
             </div>
             <div class="form-row ph-merge-row" style="margin-bottom:8px;">
                 <div class="form-group">
                     <label>PDF 2</label>
                     <input type="text" class="form-input ph-merge-input" placeholder="C:\path\to\second.pdf">
                 </div>
+
+                <div>
+  <button class="btn btn-outline ph-row-browse-btn" style="padding:8px 14px;"
+    title="Choose a PDF from your computer">&#128193;</button>
+</div>
                 <div>
                     <button class="btn btn-outline ph-remove-btn" style="padding:8px 12px; color:#f87171; border-color:rgba(239,68,68,0.3);" title="Remove">&times;</button>
                 </div>
@@ -584,6 +603,8 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 
         <div class="form-row" style="gap:10px;">
             <button id="phAddPdfBtn" class="btn btn-outline" style="padding:8px 16px;">&#43; Add PDF</button>
+            <button id="phPickManyBtn" class="btn btn-outline" style="padding:8px 16px;"
+  title="Pick several PDFs at once; rows are filled in the selected order">&#128193; Browse PDFs...</button>
             <button id="phMergeBtn" class="btn btn-success">&#128279; Merge</button>
         </div>
 
@@ -822,13 +843,25 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 
     <div class="form-row" style="margin-bottom:14px;">
       <div class="form-group">
-        <label for="amzBase">Base Folder (ship-date image folder)</label>
-        <input type="text" class="form-input" id="amzBase" placeholder="C:\Users\you\Desktop\ship-1-7-image">
+        <label for="amzBase">Base Folder</label>
+        <input type="text" class="form-input" id="amzBase" placeholder="C:\Users\you\Desktop\Orders>">
       </div>
       <div>
         <button id="amzSaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
       </div>
     </div>
+<!-- Row 2: Ship folder selector -->
+<div class="form-row" style="margin-bottom:14px;">
+  <div class="form-group">
+    <label for="amzShip">Ship Folder</label>
+    <select class="form-input" id="amzShip" disabled>
+      <option value="">— save base folder first —</option>
+    </select>
+  </div>
+  <div>
+    <button id="amzRefresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
+  </div>
+</div>
 
     <div class="form-row">
       <div class="form-group" style="max-width:160px;">
@@ -1104,6 +1137,54 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     <div>
       <button id="m5SaveBase" class="btn btn-primary" style="padding:10px 18px;">&#128190; Save</button>
     </div>
+
+
+    <div>
+  <button id="m5ResetBaseBtn" class="btn btn-outline"
+    style="padding:10px 16px; background: rgba(239,68,68,0.12);
+           border-color: rgba(239,68,68,0.5); color: #f87171;"
+    title="Recycle everything in the base folder and recreate empty category folders">&#9888; Reset Base Folder</button>
+</div>
+</div>
+
+<!-- Reset Base Folder confirmation -->
+<div id="m5ResetModal" style="display:none; margin:0 0 14px; padding:16px; border-radius:10px;
+     background: rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.3);">
+  <p style="font-size:.82rem; color: #fca5a5; margin:0 0 10px;">
+    <strong>&#9888; Danger:</strong> every file and folder inside
+    <span id="m5ResetPath" class="code-name"></span> will be moved to the
+    <strong>Recycle Bin</strong>, then 6 empty folders will be created
+    (3x2, magnet, ship-1-1-image, ship-3-3-image, ship-4-6-image and the custom one below).
+  </p>
+  <div class="form-row" style="margin-bottom:10px;">
+    <div class="form-group" style="max-width:140px;">
+      <label for="m5ResetN1">Number 1</label>
+      <input type="number" class="form-input" id="m5ResetN1" min="0" max="999" placeholder="13">
+    </div>
+    <div class="form-group" style="max-width:140px;">
+      <label for="m5ResetN2">Number 2</label>
+      <input type="number" class="form-input" id="m5ResetN2" min="0" max="999" placeholder="10">
+    </div>
+    <div class="form-group">
+      <label>Will create</label>
+      <div class="code-name" id="m5ResetPreview" style="padding:10px 0;">ship-?-?-image</div>
+    </div>
+    <div>
+      <button id="m5ResetGoBtn" class="btn btn-primary"
+        style="padding:10px 18px; background: #dc2626; border-color: #dc2626;">&#128465; Confirm &amp; Reset</button>
+    </div>
+    <div>
+      <button id="m5ResetCancelBtn" class="btn btn-outline" style="padding:10px 16px;">Cancel</button>
+    </div>
+  </div>
+  <div id="m5ResetResult" style="display:none; font-size:.8rem;"></div>
+</div>
+
+
+
+
+
+
   </div>
 
   <div class="form-row" style="margin-bottom:14px;">
@@ -1117,16 +1198,30 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
       <button id="m5Refresh" class="btn btn-outline" style="padding:10px 16px;" disabled>&#8635;</button>
     </div>
    <div>
-            <button id="m5ExtractBtn" class="btn btn-primary" disabled>&#128230; Extract Images</button>
+            <button id="m5ExtractBtn" class="btn btn-primary" disabled>&#128230; Extract </button>
         </div>
+
+          <div>
+  <button id="m5GalleryBtn" class="btn btn-outline" disabled
+    style="padding:10px 16px; background: rgba(96,165,250,0.1); 
+           border-color: rgba(96,165,250,0.4); color: #60a5fa;"
+    title="Browse every photo in this ship folder and delete unwanted ones">&#128444;Gallery</button>
+</div>
         <div>
-            <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process All Orders</button>
+            <button id="m5RunBtn" class="btn btn-success" disabled>&#9654; Process</button>
         </div>
-    <div>
+
+      <div>
+  <button id="m5SortBtn" class="btn btn-outline" disabled
+    style="padding:10px 16px; background: rgba(251,191,36,0.1);
+           border-color: rgba(251,191,36,0.4); color: #fbbf24;"
+    title="Move 3x2 / 4x6 / magnet order folders into base-folder categories and letter-rename images">&#128194; Sort Variants</button>
+</div>
+    <!-- <div>
             <button id="m5WaBtn" class="btn btn-outline"
             style="padding:10px 16px; background: rgba(37,211,102,0.1); border-color: rgba(37,211,102,0.4);
             color: #25d366;" title="Import orders from WhatsApp chat export">&#128172; WA Import</button>
-        </div>
+        </div> -->
     </div>
 
     <div id="m5WaModal" style="display:none; margin:14px 0; padding:16px; border-radius:10px;
@@ -1151,6 +1246,12 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
     
     
     </div>
+
+    <!-- Sort Variants result -->
+<div id="m5SortResult" style="display:none; margin:14px 0; padding:14px; border-radius:10px;
+     background: rgba(251,191,36,0.05); border:1px solid rgba(251,191,36,0.2);
+     font-size:.82rem; color: #ddd;"></div>
+
 
     <div class="progress-section" id="m5ExtProgress">
         <div class="stage-timeline" id="m5ExtStages">
@@ -1185,10 +1286,36 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
             <div class="summary-item">Zips extracted: <span id="m5ExtSumZips">-</span></div>
             <div class="summary-item">Files deleted: <span id="m5ExtSumDeleted">-</span></div>
             <div class="summary-item">OCR removed: <span id="m5ExtSumOcr">-</span></div>
+            <div class="summary-item">Not multiple of 9 : <span id="m5ExtSumOdd">-</span></div>
             <div class="summary-item">Time: <span id="m5ExtSumTime">-</span></div>
             <div class="summary-item" style="grid-column:span 2;">Report: <span id="m5ExtSumReport">-</span></div>
         </div>
     </div>
+
+<!-- Orders whose photo count isn't a multiple of 9 -->
+<div class="table-section" id="m5OddTable">
+  <div class="table-title" style="color: #fbbf24;">
+    &#9888; Photo Count Not a Multiple of 9
+    <span class="count-badge" id="m5OddCount"
+      style="background: rgba(251,191,36,.15); color: #fbbf24;">0</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Folder</th>
+          <th>Order ID</th>
+          <th>Images</th>
+          <th>Extra</th>
+          <th>Short By</th>
+        </tr>
+      </thead>
+      <tbody id="m5OddTbody"></tbody>
+    </table>
+  </div>
+</div>
+
 
     <div class="table-section" id="m5ExtTable">
         <div class="table-title">
@@ -1330,6 +1457,179 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
 </div>
 </div>
 
+
+<div id="galOverlay" class="gal-overlay" style="display:none;">
+  <div class="gal-header">
+    <div class="gal-title">
+      <span id="galShipName">Photo Gallery</span>
+      <span class="gal-sub" id="galCounts"></span>
+    </div>
+    <div class="gal-actions">
+      <span class="gal-selinfo" id="galSelInfo">0 selected</span>
+      <button id="galSelectAll" class="btn btn-outline gal-btn">Select All</button>
+      <button id="galClearSel" class="btn btn-outline gal-btn">Clear</button>
+      <button id="galDeleteBtn" class="btn gal-btn gal-del" disabled>&#128465; Delete Selected</button>
+      <button id="galCloseBtn" class="btn btn-outline gal-btn" title="Close">&#10005;</button>
+    </div>
+  </div>
+  <div class="gal-body" id="galBody">
+    <div class="gal-empty" id="galEmpty" style="display:none;">No photos found in this ship folder.</div>
+    <div id="galGroups"></div>
+  </div>
+  <div class="gal-loader" id="galLoader" style="display:none;">
+    <div class="pv-spinner"></div>
+    <div class="pv-loader-text" id="galLoaderText">Scanning photos...</div>
+  </div>
+
+  <!-- Lightbox: full-size single photo viewer -->
+  <div id="galLightbox" class="gal-lightbox" style="display:none;">
+    <button class="gal-lb-close" id="galLbClose" title="Close (Esc)">&#10005;</button>
+    <button class="gal-lb-nav gal-lb-prev" id="galLbPrev" title="Previous (&larr;)">&#10094;</button>
+    <img id="galLbImg" alt="">
+    <button class="gal-lb-nav gal-lb-next" id="galLbNext" title="Next (&rarr;)">&#10095;</button>
+    <div class="gal-lb-bar">
+      <span id="galLbName"></span>
+      <button id="galLbToggle" class="btn gal-btn">Select</button>
+    </div>
+  </div>
+</div>
+
+<style>
+/* --- Photo gallery overlay --------------------------------------------- */
+.gal-overlay {
+  position: fixed; inset: 0; z-index: 9998;
+  background: rgba(10, 10, 20, 0.98);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.gal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 12px 20px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.gal-title { display: flex; align-items: center; gap: 12px; }
+.gal-title > span:first-child { font-size: 1.05rem; font-weight: 700; color: #f0f0f0; }
+.gal-sub {
+  font-size: .76rem; color: #9aa; padding: 2px 10px;
+  border-radius: 12px; background: rgba(96,165,250,0.15);
+}
+.gal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gal-btn { padding: 7px 14px; font-size: .78rem; }
+.gal-selinfo {
+  font-size: .78rem; color: #c4b5fd; font-weight: 600;
+  min-width: 86px; text-align: right;
+}
+.gal-del {
+  background: rgba(239,68,68,0.85); color: #fff;
+  border: 1px solid rgba(239,68,68,0.9);
+}
+.gal-del:hover:not(:disabled) { background: rgba(239,68,68,1); }
+.gal-del:disabled { opacity: .45; cursor: not-allowed; }
+
+.gal-body { flex: 1; overflow-y: auto; padding: 16px 20px 40px; }
+.gal-empty { color: #888; text-align: center; padding: 60px 0; font-size: .9rem; }
+
+.gal-group { margin-bottom: 26px; }
+.gal-group-head {
+  display: flex; align-items: center; gap: 10px;
+  position: sticky; top: -16px; z-index: 2;
+  padding: 8px 0 8px; margin-bottom: 10px;
+  background: rgba(10,10,20,0.98);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  /* [Lines 1698-1704 are missing from the provided images] */
+  border-radius: 6px; cursor: pointer;
+}
+.gal-group-pick:hover { background: rgba(255,255,255,0.12); }
+
+.gal-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+.gal-cell {
+  position: relative; aspect-ratio: 1 / 1;
+  border-radius: 8px; overflow: hidden;
+  background: #1a1a2a; cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color .12s, transform .12s;
+}
+.gal-cell:hover { transform: translateY(-2px); }
+.gal-cell img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  user-select: none; -webkit-user-drag: none;
+}
+.gal-cell.sel { border-color: #a78bfa; }
+.gal-cell.sel::after {
+  content: '\2713';
+  position: absolute; top: 6px; left: 6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #a78bfa; color: #fff;
+  font-size: .72rem; line-height: 20px; text-align: center;
+  font-weight: 700;
+}
+.gal-cell.gone { opacity: .25; pointer-events: none; filter: grayscale(1); }
+.gal-zoom {
+  position: absolute; top: 5px; right: 5px;
+  width: 24px; height: 24px; border-radius: 6px;
+  background: rgba(0,0,0,0.6); color: #fff;
+  border: none; cursor: pointer; font-size: .72rem;
+  display: none; align-items: center; justify-content: center;
+}
+.gal-cell:hover .gal-zoom { display: flex; }
+.gal-name {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 3px 6px; font-size: .62rem; color: #ddd;
+  background: linear-gradient(transparent, rgba(0,0,0,0.85));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gal-loader {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  background: rgba(10,10,20,0.9); z-index: 5;
+}
+
+/* Lightbox */
+.gal-lightbox {
+  position: absolute; inset: 0; z-index: 10;
+  background: rgba(0,0,0,0.95);
+  display: flex; align-items: center; justify-content: center;
+}
+.gal-lightbox img {
+  max-width: 88vw; max-height: 82vh;
+  object-fit: contain; border-radius: 6px;
+}
+.gal-lb-close {
+  position: absolute; top: 16px; right: 20px;
+  width: 36px; height: 36px; border-radius: 8px;
+  background: rgba(255,255,255,0.1); color: #fff;
+  border: 1px solid rgba(255,255,255,0.2);
+  cursor: pointer; font-size: 1rem;
+}
+.gal-lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 46px; height: 76px; border-radius: 10px;
+  background: rgba(255,255,255,0.08); color: #fff;
+  border: 1px solid rgba(255,255,255,0.16);
+  cursor: pointer; font-size: 1.3rem;
+}
+.gal-lb-nav:hover { background: rgba(255,255,255,0.18); }
+.gal-lb-prev { left: 18px; }
+.gal-lb-next { right: 18px; }
+.gal-lb-bar {
+  position: absolute; bottom: 18px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 16px; border-radius: 10px;
+  background: rgba(20,20,35,0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: .78rem; color: #ddd; max-width: 80vw;
+}
+.gal-lb-bar > span {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+</style>
 <div id="previewOverlay" class="pv-overlay" style="display:none;">
   <div class="pv-header">
     <div class="pv-title">
@@ -2414,6 +2714,144 @@ $pdfLabel.innerHTML =
     .catch(function (e) { alert('Failed: ' + e.message); })
     .finally(function () { $saveBase.disabled = false; });
   });
+
+var $sortBtn    = document.getElementById('m5SortBtn');
+var $sortResult = document.getElementById('m5SortResult');
+
+$sortBtn.addEventListener('click', function () {
+    var shipFolder = $ship.value;
+    if (!shipFolder) { alert('Select a ship folder first.'); return; }
+    if (!confirm('Move every order folder ending with 3x2, 4x6 or magnet out of ' +
+                 'the selected ship folder into the base-folder categories, ' +
+                 'then letter-rename images in magnet and 3x2?')) return;
+
+    $sortBtn.disabled = true;
+    $sortBtn.textContent = 'Sorting...';
+    $sortResult.style.display = 'none';
+
+    fetch('/polaroid/sort-variants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ship_folder: shipFolder }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+        $sortResult.style.display = 'block';
+        if (d.error) {
+            $sortResult.innerHTML = '<span style="color:#f87171;">Error: ' + escH5(d.error) + '</span>';
+            return;
+        }
+        var html = '<strong style="color:#fbbf24;">Moved ' + d.moved_count + ' order folder' +
+                   (d.moved_count === 1 ? '' : 's') + '</strong> into ' + escH5(d.base_folder) + '<br>';
+        html += Object.keys(d.counts).map(function (k) {
+            return escH5(k) + ': <strong>' + d.counts[k] + '</strong>';
+        }).join(' &middot; ');
+
+        Object.keys(d.renamed || {}).forEach(function (cat) {
+            var list = d.renamed[cat];
+            if (!list.length) return;
+            html += '<br><br><strong>' + escH5(cat) + '</strong> - letter-renamed ' +
+                    list.length + ' order folder' + (list.length === 1 ? '' : 's') + ':<br>' +
+                    list.map(function (o) {
+                        return '<span class="code-name">' + escH5(o.folder) + '</span> &rarr; ' +
+                               escH5(o.letter) + ' (1...' + o.images + ')';
+                    }).join('<br>');
+        });
+
+        if (d.failed && d.failed.length) {
+            html += '<br><br><span style="color:#f87171;">Failed: ' +
+                    d.failed.map(function (f) {
+                        return escH5(f.folder) + ' (' + escH5(f.error) + ')';
+                    }).join(', ') + '</span>';
+        }
+        $sortResult.innerHTML = html;
+        loadShipFolders();
+    })
+    .catch(function (e) {
+        $sortResult.style.display = 'block';
+        $sortResult.innerHTML = '<span style="color:#f87171;">Request failed: ' + escH5(e.message) + '</span>';
+    })
+    .finally(function () {
+        $sortBtn.disabled = !$ship.value;
+        $sortBtn.innerHTML = '&#128194; Sort Variants';
+    });
+});
+
+/* — Reset Base Folder (danger) — */
+var $resetBtn        = document.getElementById('m5ResetBaseBtn');
+var $resetModal      = document.getElementById('m5ResetModal');
+var $resetN1         = document.getElementById('m5ResetN1');
+var $resetN2         = document.getElementById('m5ResetN2');
+var $resetPreview    = document.getElementById('m5ResetPreview');
+var $resetPath       = document.getElementById('m5ResetPath');
+var $resetGoBtn      = document.getElementById('m5ResetGoBtn');
+var $resetCancelBtn  = document.getElementById('m5ResetCancelBtn');
+var $resetResult     = document.getElementById('m5ResetResult');
+
+function updateResetPreview() {
+    var a = $resetN1.value.trim(), b = $resetN2.value.trim();
+    $resetPreview.textContent = 'ship-' + (a === '' ? '?' : a) + '-' +
+                                (b === '' ? '?' : b) + '-image';
+}
+$resetN1.addEventListener('input', updateResetPreview);
+$resetN2.addEventListener('input', updateResetPreview);
+
+$resetBtn.addEventListener('click', function () {
+    var open = $resetModal.style.display === 'none';
+    $resetModal.style.display = open ? 'block' : 'none';
+    if (open) {
+        $resetPath.textContent = $base.value.trim() || '(base folder not saved)';
+        $resetResult.style.display = 'none';
+        updateResetPreview();
+    }
+});
+
+$resetCancelBtn.addEventListener('click', function () {
+    $resetModal.style.display = 'none';
+});
+
+$resetGoBtn.addEventListener('click', function () {
+    var n1 = $resetN1.value.trim(), n2 = $resetN2.value.trim();
+    if (n1 === '' || n2 === '') { alert('Enter both numbers for the custom ship folder.'); return; }
+    if (!confirm('This will move EVERYTHING inside\n' + ($base.value.trim() || '') +
+                 '\ninto the Recycle Bin and create 6 empty folders including ship-' +
+                 n1 + '-' + n2 + '-image.\n\nProceed?')) return;
+
+    $resetGoBtn.disabled = true;
+    $resetGoBtn.textContent = 'Resetting...';
+    $resetResult.style.display = 'none';
+
+    fetch('/polaroid/reset-base', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ n1: n1, n2: n2 }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+        $resetResult.style.display = 'block';
+        if (d.error) {
+            $resetResult.innerHTML = '<span style="color:#f87171;">Error: ' + escH5(d.error) + '</span>';
+            return;
+        }
+        $resetResult.innerHTML = '<span style="color:#4ade80;">Recycled ' + d.recycled +
+            ' item' + (d.recycled === 1 ? '' : 's') + '. Created: ' +
+            d.created.map(escH5).join(', ') + '</span>';
+        loadShipFolders();
+    })
+    .catch(function (e) {
+        $resetResult.style.display = 'block';
+        $resetResult.innerHTML = '<span style="color:#f87171;">Request failed: ' + escH5(e.message) + '</span>';
+    })
+    .finally(function () {
+        $resetGoBtn.disabled = false;
+        $resetGoBtn.innerHTML = '&#128465; Confirm &amp; Reset';
+    });
+});
+
+
+
+
+
 /* — WhatsApp Import — */
 var $waBtn       = document.getElementById('m5WaBtn');
 var $waModal     = document.getElementById('m5WaModal');
@@ -2481,6 +2919,12 @@ $waGoBtn.addEventListener('click', function () {
     $refresh.disabled = true;
     $runBtn.disabled = true;
 
+    $extractBtn.disabled = true;
+$sortBtn.disabled = true;
+var gb0 = document.getElementById('m5GalleryBtn');
+if (gb0) gb0.disabled = true;
+
+
     fetch('/polaroid/ship-folders')
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -2511,6 +2955,9 @@ $waGoBtn.addEventListener('click', function () {
   $ship.addEventListener('change', function () {
     $runBtn.disabled = !this.value;
     $extractBtn.disabled = !this.value;
+    $sortBtn.disabled = !this.value;
+    var gb = document.getElementById('m5GalleryBtn');
+    if (gb) gb.disabled = !this.value;
   });
 
   /* --- Start bulk processing --- */
@@ -2657,6 +3104,8 @@ if (d.done || (d.stage === 'done')) {
 function enableControls() {
     $runBtn.disabled = !$ship.value;
     $extractBtn.disabled = !$ship.value;
+    var gb = document.getElementById('m5GalleryBtn');
+    if (gb) gb.disabled = !$ship.value;
     $ship.disabled = false;
     $refresh.disabled = false;
 }
@@ -2700,6 +3149,9 @@ function resetExtract() {
     $extProgress.classList.remove('visible');
     $extSummary.classList.remove('visible');
     $extTable.classList.remove('visible');
+    document.getElementById('m5OddTable').classList.remove('visible');
+    document.getElementById('m5OddTbody').innerHTML = '';
+    document.getElementById('m5OddCount').textContent = '0';
     $extBar.style.width = '0%';
     $extBar.classList.remove('done','error');
     $extPct.textContent = '0%';
@@ -2808,9 +3260,39 @@ function subscribeExtract(taskId) {
                 document.getElementById('m5ExtSumZips').textContent = r.zips_extracted;
                 document.getElementById('m5ExtSumDeleted').textContent = r.files_deleted;
                 document.getElementById('m5ExtSumOcr').textContent = r.ocr_removed;
+                document.getElementById('m5ExtSumOdd').textContent = r.not_multiple_9_count || 0;
                 document.getElementById('m5ExtSumTime').textContent = r.elapsed + 's';
                 document.getElementById('m5ExtSumReport').textContent = r.report_path;
                 $extSummary.classList.add('visible');
+
+                var oddTable   = document.getElementById('m5OddTable');
+var oddTbody   = document.getElementById('m5OddTbody');
+var oddBadge   = document.getElementById('m5OddCount');
+var oddSet     = {};
+var oddList    = r.not_multiple_9 || [];
+if (oddList.length) {
+  oddBadge.textContent = oddList.length;
+  oddTbody.innerHTML = oddList.map(function (o, i) {
+    oddSet[o.folder] = true;
+    return '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td><span class="code-name">' + escH5(o.folder) + '</span></td>' +
+      '<td><span class="tag tag-id">' + escH5(o.order_id) + '</span></td>' +
+      '<td><strong style="color:#fbbf24;">' + o.count + '</strong></td>' +
+      '<td>+' + o.remainder + '</td>' +
+      '<td>' + o.short_by + ' more \u2192 ' + (o.count + o.short_by) + '</td>' +
+      '</tr>';
+  }).join('');
+  oddTable.classList.add('visible');
+} else {
+  oddTbody.innerHTML = '';
+  oddTable.classList.remove('visible');
+}
+
+
+
+
+
 
                 if (r.orders && r.orders.length) {
                     $extCount.textContent = r.orders.length;
@@ -2826,8 +3308,11 @@ function subscribeExtract(taskId) {
                             '<td>' + (i + 1) + '</td>' +
                             '<td><span class="code-name">' + escHS(o.folder) + '</span></td>' +
                             '<td><span class="tag tag-id">' + escHS(o.order_id) + '</span></td>' +
-                            '<td>' + o.final_count + '</td>' +
-                            '<td>' + zipTag + '</td>' +
+                            '<td>' + (oddSet[o.folder] ? '<strong style="color:#fbbf24;" title="Not a multiple of 9">' + o.final_count + '</strong>' : o.final_count) + '</td>' +
+                            
+                            
+                            
+                              '<td>' + zipTag + '</td>' +
                             '<td>' + ocrTag + '</td>' +
                             '</tr>';
                     }).join('');
@@ -2927,7 +3412,306 @@ $searchId.addEventListener('keydown', function (e) {
 });
 })();
 </script>
+<!-- ===================== PHOTO GALLERY JS ======================= -->
+<script>
+(function () {
+  var $btn      = document.getElementById('m5GalleryBtn');
+  var $overlay  = document.getElementById('galOverlay');
+  var $groups   = document.getElementById('galGroups');
+  var $empty    = document.getElementById('galEmpty');
+  var $shipName = document.getElementById('galShipName');
+  var $counts   = document.getElementById('galCounts');
+  var $selInfo  = document.getElementById('galSelInfo');
+  var $selectAll = document.getElementById('galSelectAll');
+  var $clearSel = document.getElementById('galClearSel');
+  var $delBtn   = document.getElementById('galDeleteBtn');
+  var $closeBtn = document.getElementById('galCloseBtn');
+  var $loader   = document.getElementById('galLoader');
+  var $loaderTx = document.getElementById('galLoaderText');
 
+  var $lb       = document.getElementById('galLightbox');
+  var $lbImg    = document.getElementById('galLbImg');
+  var $lbName   = document.getElementById('galLbName');
+  var $lbPrev   = document.getElementById('galLbPrev');
+  var $lbNext   = document.getElementById('galLbNext');
+  var $lbClose  = document.getElementById('galLbClose');
+  var $lbToggle = document.getElementById('galLbToggle');
+
+  if (!$btn) return;
+
+  var _scanId = null;
+  var _sel = {};       // fid -> true
+  var _flat = [];      // [{id, name, folder, cellEl}] in display order
+  var _lbIdx = -1;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  function fmtSize(b) {
+    if (!b) return '';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+    return (b / 1048576).toFixed(1) + ' MB';
+  }
+
+  function thumbUrl(fid, full) {
+    return '/polaroid/gallery-thumb/' + encodeURIComponent(_scanId) + '/' +
+           encodeURIComponent(fid) + (full ? '?full=1' : '');
+  }
+
+  function selCount() { return Object.keys(_sel).length; }
+
+  function refreshSelUI() {
+    var n = selCount();
+    $selInfo.textContent = n + ' selected';
+    $delBtn.disabled = n === 0;
+    $delBtn.innerHTML = n > 0
+      ? '&#128465; Delete Selected (' + n + ')'
+      : '&#128465; Delete Selected';
+  }
+
+  function setSelected(fid, on, cellEl) {
+    if (on) { _sel[fid] = true; } else { delete _sel[fid]; }
+    var el = cellEl || document.querySelector('.gal-cell[data-fid="' + fid + '"]');
+    if (el) el.classList.toggle('sel', !!on);
+    refreshSelUI();
+  }
+
+  // --- Open: scan the selected ship folder ---
+  $btn.addEventListener('click', function () {
+    var shipSel = document.getElementById('m5Ship');
+    var shipFolder = shipSel ? shipSel.value : '';
+    if (!shipFolder) { alert('Select a ship folder first.'); return; }
+
+    _scanId = null; _sel = {}; _flat = [];
+    $groups.innerHTML = '';
+    $empty.style.display = 'none';
+    $shipName.textContent = 'Photo Gallery';
+    $counts.textContent = '';
+    refreshSelUI();
+    $loaderTx.textContent = 'Scanning photos...';
+    $loader.style.display = 'flex';
+    $overlay.style.display = 'flex';
+
+    fetch('/polaroid/gallery-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ship_folder: shipFolder })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      $loader.style.display = 'none';
+      if (d.error) { alert(d.error); closeGallery(); return; }
+      _scanId = d.scan_id;
+      $shipName.textContent = d.ship_folder || 'Photo Gallery';
+      $counts.textContent = d.total_photos + ' photos · ' +
+                            d.total_orders + ' orders';
+      render(d.orders || []);
+    })
+    .catch(function (err) {
+      $loader.style.display = 'none';
+      alert('Scan failed: ' + err.message);
+      closeGallery();
+    });
+  });
+
+  function render(orders) {
+    if (!orders.length) { $empty.style.display = 'block'; return; }
+    var frag = document.createDocumentFragment();
+
+    orders.forEach(function (o) {
+      var group = document.createElement('div');
+      group.className = 'gal-group';
+
+      var head = document.createElement('div');
+      head.className = 'gal-group-head';
+      head.innerHTML =
+        '<span class="gal-group-name">' + esc(o.folder) + '</span>' +
+        '<span class="gal-group-meta">#' + esc(o.order_id) + ' · ' +
+        o.count + ' photo' + (o.count === 1 ? '' : 's') + '</span>';
+
+      var pick = document.createElement('button');
+      pick.className = 'gal-group-pick';
+      pick.textContent = 'Select all in folder';
+      head.appendChild(pick);
+      group.appendChild(head);
+
+      var grid = document.createElement('div');
+      grid.className = 'gal-grid';
+
+      var groupIds = [];
+      o.files.forEach(function (f) {
+        groupIds.push(f.id);
+        var cell = document.createElement('div');
+        cell.className = 'gal-cell';
+        cell.dataset.fid = f.id;
+        cell.title = f.name + (f.size ? ' (' + fmtSize(f.size) + ')' : '');
+
+
+        var im = document.createElement('img');
+        im.loading = 'lazy';
+        im.decoding = 'async';
+        im.src = thumbUrl(f.id, false);
+        im.alt = f.name;
+        im.onerror = function () { cell.classList.add('gone'); };
+        cell.appendChild(im);
+
+        var zoom = document.createElement('button');
+        zoom.className = 'gal-zoom';
+        zoom.innerHTML = '&#128269;';
+        zoom.title = 'View full size';
+        cell.appendChild(zoom);
+
+        var nm = document.createElement('div');
+        nm.className = 'gal-name';
+        nm.textContent = f.name;
+        cell.appendChild(nm);
+
+        var rec = { id: f.id, name: f.name, folder: o.folder, cellEl: cell };
+        _flat.push(rec);
+        var myIndex = _flat.length - 1;
+
+        cell.addEventListener('click', function (e) {
+          if (e.target === zoom) return;
+          setSelected(f.id, !_sel[f.id], cell);
+        });
+
+        zoom.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openLightbox(myIndex);
+        });
+
+        grid.appendChild(cell);
+      });
+
+      pick.addEventListener('click', function () {
+        var allOn = groupIds.every(function (id) { return _sel[id]; });
+        groupIds.forEach(function (id) { setSelected(id, !allOn); });
+        pick.textContent = allOn ? 'Select all in folder' : 'Unselect folder';
+      });
+
+      group.appendChild(grid);
+      frag.appendChild(group);
+    });
+
+    $groups.appendChild(frag);
+  }
+
+  // --- Selection controls ---
+  $selectAll.addEventListener('click', function () {
+    _flat.forEach(function (r) {
+      if (!r.cellEl.classList.contains('gone')) setSelected(r.id, true, r.cellEl);
+    });
+  });
+  $clearSel.addEventListener('click', function () {
+    Object.keys(_sel).forEach(function (id) { setSelected(id, false); });
+  });
+
+  // --- Delete selected ---
+  $delBtn.addEventListener('click', function () {
+    var ids = Object.keys(_sel);
+    if (!ids.length) return;
+    if (!confirm('Permanently delete ' + ids.length + ' photo' +
+                 (ids.length === 1 ? '' : 's') +
+                 ' from the order folder' + (ids.length === 1 ? '' : 's') +
+                 '?\n\nThis cannot be undone.')) return;
+
+    $delBtn.disabled = true;
+    $loaderTx.textContent = 'Deleting ' + ids.length + ' photo(s)...';
+    $loader.style.display = 'flex';
+
+    fetch('/polaroid/gallery-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scan_id: _scanId, ids: ids })
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      $loader.style.display = 'none';
+      if (d.error) { alert(d.error); refreshSelUI(); return; }
+      (d.deleted || []).forEach(function (fid) {
+        delete _sel[fid];
+        var el = document.querySelector('.gal-cell[data-fid="' + fid + '"]');
+        if (el) el.remove();
+        for (var i = _flat.length - 1; i >= 0; i--) {
+          if (_flat[i].id === fid) { _flat.splice(i, 1); break; }
+        }
+      });
+      $counts.textContent = _flat.length + ' photos remaining';
+      refreshSelUI();
+      if (d.failed && d.failed.length) {
+        alert(d.failed.length + ' file(s) could not be deleted.');
+      }
+      if (!_flat.length) $empty.style.display = 'block';
+    })
+    .catch(function (err) {
+      $loader.style.display = 'none';
+      alert('Delete failed: ' + err.message);
+      refreshSelUI();
+    });
+  });
+
+  // --- Lightbox ---
+  function openLightbox(idx) {
+    if (idx < 0 || idx >= _flat.length) return;
+    _lbIdx = idx;
+    var r = _flat[idx];
+    $lbImg.src = thumbUrl(r.id, true);
+    $lbName.textContent = r.folder + ' / ' + r.name +
+                          ' (' + (idx + 1) + ' of ' + _flat.length + ')';
+    $lbToggle.textContent = _sel[r.id] ? 'Unselect' : 'Select';
+    $lb.style.display = 'flex';
+  }
+  function closeLightbox() { $lb.style.display = 'none'; _lbIdx = -1; }
+  function stepLightbox(d) {
+    if (_lbIdx < 0) return;
+    var n = _lbIdx + d;
+    if (n < 0) n = _flat.length - 1;
+    if (n >= _flat.length) n = 0;
+    openLightbox(n);
+  }
+
+  $lbPrev.addEventListener('click', function () { stepLightbox(-1); });
+  $lbNext.addEventListener('click', function () { stepLightbox(1); });
+  $lbClose.addEventListener('click', closeLightbox);
+  $lb.addEventListener('click', function (e) { if (e.target === $lb) closeLightbox(); });
+  $lbToggle.addEventListener('click', function () {
+    if (_lbIdx < 0) return;
+    var r = _flat[_lbIdx];
+    setSelected(r.id, !_sel[r.id], r.cellEl);
+    $lbToggle.textContent = _sel[r.id] ? 'Unselect' : 'Select';
+  });
+
+  // --- Close gallery ---
+  function closeGallery() {
+    closeLightbox();
+    $overlay.style.display = 'none';
+    $groups.innerHTML = '';
+    _flat = []; _sel = {}; _scanId = null;
+    refreshSelUI();
+  }
+  $closeBtn.addEventListener('click', closeGallery);
+
+  document.addEventListener('keydown', function (e) {
+    if ($overlay.style.display === 'none') return;
+    if ($lb.style.display !== 'none') {
+      if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stepLightbox(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1); }
+      else if (e.key === ' ') { e.preventDefault(); $lbToggle.click(); }
+      return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); closeGallery(); }
+    else if (e.key === 'Delete' && selCount()) { e.preventDefault(); $delBtn.click(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault(); $selectAll.click();
+    }
+  });
+})();
+</script>
 <!-- ========================== PREVIEW OVERLAY JS ========================== -->
 <script>
 (function () {
@@ -3866,6 +4650,36 @@ x: Math.round(finalX * 1000) / 1000,
 <script>
 (function() {
   // — Split functionality —
+
+
+  function pickPdf(multiple) {
+  return fetch('/pick-pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ multiple: !!multiple })
+  })
+  .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+  .then(function(res) {
+    if (!res.ok || res.data.error) throw new Error(res.data.error || 'File picker failed.');
+    return res.data.paths || [];
+  });
+}
+
+function bindBrowse(btn, input) {
+  btn.addEventListener('click', function() {
+    btn.disabled = true;
+    pickPdf(false)
+      .then(function(paths) { if (paths.length) input.value = paths[0]; })
+      .catch(function(e) { showAlert('danger', e.message); })
+      .finally(function() { btn.disabled = false; });
+  });
+}
+
+document.querySelectorAll('.ph-browse-btn').forEach(function(btn) {
+  var input = document.getElementById(btn.dataset.target);
+  if (input) bindBrowse(btn, input);
+});
+
   var $splitFile = document.getElementById('phSplitFile');
   var $splitBtn = document.getElementById('phSplitBtn');
   var $splitStatus = document.getElementById('phSplitStatus');
@@ -3990,6 +4804,7 @@ $halfBtn.addEventListener('click', function() {
   // — Merge functionality —
   var $mergeList = document.getElementById('phMergeList');
   var $addPdfBtn = document.getElementById('phAddPdfBtn');
+  var $pickManyBtn = document.getElementById('phPickManyBtn');
   var $mergeBtn = document.getElementById('phMergeBtn');
   var $mergeStatus = document.getElementById('phMergeStatus');
   var $mergeStatusText = document.getElementById('phMergeStatusText');
@@ -3998,24 +4813,50 @@ $halfBtn.addEventListener('click', function() {
   var $mergePill = document.getElementById('phMergePill');
   var mergeCounter = 2;
 
-  // Add PDF row
-  $addPdfBtn.addEventListener('click', function() {
+  function bindRowBrowse(row) {
+    var btn = row.querySelector('.ph-row-browse-btn');
+    var input = row.querySelector('.ph-merge-input');
+    if (btn && input) bindBrowse(btn, input);
+}
+
+function addMergeRow() {
     mergeCounter++;
     var row = document.createElement('div');
     row.className = 'form-row ph-merge-row';
     row.style.marginBottom = '8px';
-
-
-
-    row.innerHTML = '<div class="form-group"><label>PDF ' + mergeCounter + '</label><input type="text" class="form-input ph-merge-input" placeholder="C:\\path\\to\\file.pdf"></div><div><button class="btn btn-outline ph-remove-btn" style="padding:8px 12px; color:#f87171; border-color:rgba(239,68,68,0.3);" title="Remove">&times;</button></div>';
-    $mergeList.appendChild(row);
+    row.innerHTML = '<div class="form-group"><label>PDF ' + mergeCounter + '</label><input type="text" class="form-input ph-merge-input" placeholder="C:\\path\\to\\file.pdf"></div>' +
+        '<div><button class="btn btn-outline ph-row-browse-btn" style="padding:8px 14px;" title="Choose a PDF from your computer">&#128193;</button></div>' +
+        '<div><button class="btn btn-outline ph-remove-btn" style="padding:8px 12px; color:#f87171; border-color:rgba(239,68,68,0.3);" title="Remove">&times;</button></div>';
     
-    // Bind remove
+    $mergeList.appendChild(row);
+    bindRowBrowse(row);
     row.querySelector('.ph-remove-btn').addEventListener('click', function() {
-      row.remove();
-      _renumberMergeRows();
+        row.remove();
+        _renumberMergeRows();
     });
-  });
+    return row;
+}
+
+$mergeList.querySelectorAll('.ph-merge-row').forEach(bindRowBrowse);
+
+// Add PDF row
+$addPdfBtn.addEventListener('click', addMergeRow);
+
+// Pick several PDFs at once and fill the rows in order
+$pickManyBtn.addEventListener('click', function() {
+    $pickManyBtn.disabled = true;
+    pickPdf(true)
+        .then(function(paths) {
+            if (!paths.length) return;
+            paths.forEach(function(p, i) {
+                var rows = $mergeList.querySelectorAll('.ph-merge-row');
+                var row = rows[i] || addMergeRow();
+                row.querySelector('.ph-merge-input').value = p;
+            });
+        })
+        .catch(function(e) { showAlert('danger', e.message); })
+        .finally(function() { $pickManyBtn.disabled = false; });
+});
 
   // Remove button handler for initial rows
   document.querySelectorAll('.ph-remove-btn').forEach(function(btn) {
@@ -4119,6 +4960,12 @@ $halfBtn.addEventListener('click', function() {
 (function() {
     var $base = document.getElementById('amzBase');
     var $saveBase = document.getElementById('amzSaveBase');
+
+    var $ship = document.getElementById('amzShip');
+    var $refresh = document.getElementById('amzRefresh'); 
+
+
+
     var $shipDay = document.getElementById('amzShipDay');
     var $browserBtn = document.getElementById('amzBrowserBtn');
     var $browserStatus = document.getElementById('amzBrowserStatus');
@@ -4141,11 +4988,50 @@ $halfBtn.addEventListener('click', function() {
     var evtSource = null;
     var startTime = null;
 
-    // Load saved base folder
-    fetch('/amazon-download/base-folder')
-        .then(function(r){ return r.json(); })
-        .then(function(d){ if(d.base_folder) $base.value = d.base_folder; })
-        .catch(function(){});
+    function escAmz(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  fetch('/amazon-download/base-folder')
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    var f = d.folder || d.base_folder;
+    if(f) { $base.value = f; loadAmzShipFolders(); }
+  })
+  .catch(function(){});
+
+// Load ship folders inside the saved base folder
+function loadAmzShipFolders() {
+  $ship.disabled = true;
+  $refresh.disabled = true;
+  $runBtn.disabled = true;
+  $ship.innerHTML = '<option value="">Loading...</option>';
+
+  fetch('/amazon-download/ship-folders')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error) {
+        $ship.innerHTML = '<option value="">Error: ' + escAmz(d.error) + '</option>';
+        return;
+      }
+      if(!d.folders.length) {
+        $ship.innerHTML = '<option value="">No ship folders found</option>';
+        return;
+      }
+      var opts = '<option value="">— Select ship folder —</option>';
+      d.folders.forEach(function(f){
+        opts += '<option value="' + escAmz(f.path) + '">' +
+                escAmz(f.name) + ' (' + f.order_count + ' orders)</option>';
+      });
+      $ship.innerHTML = opts;
+      $ship.disabled = false;
+      $refresh.disabled = false;
+    })
+    .catch(function(){
+      $ship.innerHTML = '<option value="">Failed to load</option>';
+    });
+}
+
+$refresh.addEventListener('click', function(){ loadAmzShipFolders(); });
+$ship.addEventListener('change', function(){ $runBtn.disabled = !this.value; });
 
     // Check browser status on load
     function checkBrowser() {
@@ -4222,6 +5108,9 @@ $halfBtn.addEventListener('click', function() {
     $runBtn.addEventListener('click', function() {
         var base = $base.value.trim();
         if(!base) { showAlert('danger', 'Set and save a base folder first.'); return; }
+
+        var shipFolder = $ship.value
+        if(!shipFolder){ showAlert('danger', 'Select a ship folder first.'); return; }
         var day = $shipDay.value;
 
         $runBtn.disabled = true;
@@ -4242,7 +5131,7 @@ $halfBtn.addEventListener('click', function() {
         fetch('/amazon-download/start', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ship_day: day})
+            body: JSON.stringify({ship_day: day, ship_folder: shipFolder})
         })
         .then(function(r){ return r.json(); })
         .then(function(d){
@@ -4348,7 +5237,7 @@ $halfBtn.addEventListener('click', function() {
     });
 
     function resetUI() {
-        $runBtn.disabled = false;
+        $runBtn.disabled = !$ship.value;
         $stopBtn.style.display = 'none';
         currentTaskId = null;
     }
