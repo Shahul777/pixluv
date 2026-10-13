@@ -62,7 +62,7 @@ def _emit(q: queue.Queue, *, stage: str, pct: int, detail: str,
 
 VARIANT_ORDER = {"4x3": 0, "3x2": 1, "3x3": 2, "4x4": 3, "4x6": 4,"5x7": 5, "magnet": 6,"poster" : 7}
 VARIANT_RE = re.compile(r"(3x2|3x3|4x[46]|5x7|magnet|poster)", re.IGNORECASE)
-FOUR_DIGIT_RE = re.compile(r"-(\d{4})")
+FOUR_DIGIT_RE = re.compile(r"-(\d{4})(?!\d)")
 COMPLEX_INDICATORS = re.compile(r"[&]|1_2|2_2|\bset\b", re.IGNORECASE)
 
 COMBINED_RE = re.compile(r"combined", re.IGNORECASE)
@@ -87,7 +87,21 @@ def extract_four_digit_id(filename: str) -> str | None:
 
 def extract_all_four_digit_ids(filename: str) -> list[str]:
     return FOUR_DIGIT_RE.findall(filename)
+def _get_item_order_ids(item: dict, idx: int) -> list[str]:
+    """Return de-duplicated order IDs for a sorted item, preserving order.
 
+    Uses `four_digit_ids` when available, falls back to `four_digit_id`.
+    Files with no ID get a synthetic `__unk{idx}` placeholder.
+    """
+    ids = item.get("four_digit_ids")
+    if isinstance(ids, list):
+        clean = [str(x) for x in ids if x]
+        if clean:
+            return list(dict.fromkeys(clean))
+    single = item.get("four_digit_id")
+    if single:
+        return [str(single)]
+    return [f"__unk{idx}"]
 
 def detect_variant(filename: str) -> str:
     m = VARIANT_RE.search(filename)
@@ -120,35 +134,49 @@ if not _m1_log.handlers:
 
 def _add_index_to_pdfs(folder: Path, sorted_list: list[dict],
                        q: queue.Queue | None = None) -> dict[str, int]:
-    """Add serial index prefix to the label text inside each sorted PDF.
-
-    Single-order PDF:   "1.name-3637"
-    Multi-part order:   "1.a)name-3637-1/2", "1.b)name-3637-2/2"
-
-    Returns  oid_to_serial  mapping (order_id_4 -> serial int).
-    """
-    # --- group PDFs by order id -----------------------------------------
-    order_groups: dict[str, list[int]] = {}          # oid -> [indices]
-    for i, item in enumerate(sorted_list):
-        oid = item.get("four_digit_id") or f"__unk{i}"
-        order_groups.setdefault(oid, []).append(i)
-
-    # --- assign a unique serial per order id (first-appearance order) ---
+# assign a unique serial per order id (first-appearance order) —
+    # Every order ID present in a filename gets its own serial, so a
+    # combined PDF like "shahul-1234-hameed-3434" registers both 1234
+    # and 3434 in the mapping and downstream label numbering.
+    # `serial_lookup` also tracks synthetic placeholders for filenames
+    # with no detectable ID; `oid_to_serial` only exposes real IDs.
+    serial_lookup: dict[str, int] = {}
     oid_to_serial: dict[str, int] = {}
     serial = 0
-    for i in range(len(sorted_list)):
-        oid = sorted_list[i].get("four_digit_id") or f"__unk{i}"
-        if oid not in oid_to_serial:
-            serial += 1
-            oid_to_serial[oid] = serial
+    for i, item in enumerate(sorted_list):
+        for oid in _get_item_order_ids(item, i):
+            if oid not in serial_lookup:
+                serial += 1
+                serial_lookup[oid] = serial
+                if not oid.startswith("__unk"):
+                    oid_to_serial[oid] = serial_lookup[oid]
 
-    # --- build prefix string for each PDF index -------------------------
-    oid_sub: dict[str, int] = {}                     # tracks sub-letter
+    # — group single-order PDFs by order id (for a/b/c suffixes) —
+    # Only single-order PDFs get the a)/b) sub-letter treatment.
+    # Multi-order combined PDFs get a joined "s1/s2." prefix instead.
+    order_groups: dict[str, list[int]] = {}
+    for i, item in enumerate(sorted_list):
+        ids = _get_item_order_ids(item, i)
+        if len(ids) == 1:
+            order_groups.setdefault(ids[0], []).append(i)
+    oid_sub: dict[str, int] = {}                        # tracks sub-letter
     idx_to_prefix: dict[int, str] = {}
     for i, item in enumerate(sorted_list):
-        oid = item.get("four_digit_id") or f"__unk{i}"
-        s = oid_to_serial[oid]
-        grp = order_groups[oid]
+        ids = _get_item_order_ids(item, i)
+        if not ids:
+            continue
+
+        if len(ids) > 1:
+            serials = [str(serial_lookup[oid]) for oid in ids if oid in serial_lookup]
+            if serials:
+                idx_to_prefix[i] = f"{'/'.join(serials)}."
+            continue
+
+        oid = ids[0]
+        s = serial_lookup.get(oid)
+        if s is None:
+            continue
+        grp = order_groups.get(oid, [i])
         if len(grp) == 1:
             idx_to_prefix[i] = f"{s}."
         else:
@@ -517,8 +545,13 @@ def _number_shipping_labels(output_folder: Path,
     if sorted_list:
         oid_to_files: dict[str, list[str]] = {}
         for item in sorted_list:
-            oid = item.get("four_digit_id")
-            if oid:
+            item_ids = item.get("four_digit_ids")
+            if isinstance(item_ids, list) and item_ids:
+                ids = list(dict.fromkeys([str(x) for x in item_ids if x]))
+            else:
+                oid = item.get("four_digit_id")
+                ids = [str(oid)] if oid else []
+            for oid in ids:
                 oid_to_files.setdefault(oid, []).append(item["new_name"])
         repeated_ids: dict[str, list[str]] = {}
         for oid, files in oid_to_files.items():
@@ -824,12 +857,14 @@ def _run_module1(folder_path: str, task_id: str):
         sorted_list = []
         for idx, fname in enumerate(pdf_files, start=1):
             prefix = f"{idx:02d}_"
+            all_ids = list(dict.fromkeys(extract_all_four_digit_ids(fname)))
             sorted_list.append({
-                "original": fname,
-                "new_name": f"{prefix}{fname}",
-                "four_digit_id": extract_four_digit_id(fname),
-                "variant": detect_variant(fname),
-            })
+            "original": fname,
+            "new_name": f"{prefix}{fname}",
+            "four_digit_id": all_ids[0] if all_ids else None,
+            "four_digit_ids": all_ids,
+            "variant": detect_variant(fname),
+        })
 
         _emit(q, stage="sort", pct=15,
               detail=f"Sorted {len(sorted_list)} PDFs.")

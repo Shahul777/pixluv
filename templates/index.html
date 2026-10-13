@@ -1336,9 +1336,12 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
       <span id="pvOrderName">Order Preview</span>
       <span class="pv-sub" id="pvPdfLabel">PDF 1/1</span>
     </div>
-    <div class="pv-actions">
-      <button id="pvResetBtn" class="btn btn-outline pv-btn" title="Reset all to centre">&#8634; Reset</button>
-      <button id="pvSaveBtn" class="btn btn-success pv-btn">&#10003; Save &amp; Continue</button>
+    <div class="pv-actions" id="pvActions">
+      <span class="pv-drag-handle" id="pvDragHandle" title="drag to move this bar">&#10021;</span>
+  
+      <button id="pvSaveBtn" class="btn btn-success pv-btn">&#10003;</button>
+    <button id="pvLockBtn" class="pv-lock-btn" title="unlock to drag this bar">&#128274;</button> 
+    
     </div>
   </div>
   <div class="pv-body">
@@ -1382,9 +1385,52 @@ select.form-input option { background: #1e1e2e; color: #e8e8e8; padding: 8px; }
   padding: 2px 10px; border-radius: 12px;
   background: rgba(124,58,237,0.15);
 }
-.pv-actions { display: flex; gap: 10px; }
+.pv-actions { display: flex; gap: 10px; align-items: center; }
 .pv-btn { padding: 8px 20px; font-size: .82rem; }
+/*[cite: 5] */
+/* — Draggable action bar (unlock to reposition anywhere on screen) — */
+.pv-lock-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  color: #d0d0d0;
+  border-radius: 8px;
+  font-size: .85rem; line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pv-lock-btn:hover { background: rgba(255,255,255,0.12); }
+.pv-lock-btn.unlocked {
+  border-color: rgba(167,139,250,0.7);
+  background: rgba(167,139,250,0.18);
+  color: #c4b5fd;
+}
+.pv-drag-handle {
+  display: none;
+  cursor: grab;
+  color: #a78bfa;
+/*[cite: 6] */
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.pv-actions.pv-floating .pv-drag-handle { display: inline-block; }
+.pv-actions.pv-dragging .pv-drag-handle { cursor: grabbing; }
+.pv-actions.pv-floating {
+  position: fixed;
+  z-index: 10001;
+  padding: 8px 12px;
+  background: rgba(20, 20, 35, 0.96);
+  border: 1px solid rgba(167,139,250,0.45);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+.pv-actions.pv-dragging { opacity: .92; }
 
+/* — Preview overlay run stats (Order/PDF counters + start & elapsed) */
 .pv-body {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
@@ -2890,7 +2936,10 @@ $searchId.addEventListener('keydown', function (e) {
   var $orderName = document.getElementById('pvOrderName');
   var $pdfLabel  = document.getElementById('pvPdfLabel');
   var $saveBtn   = document.getElementById('pvSaveBtn');
-  var $resetBtn  = document.getElementById('pvResetBtn');
+  // var $resetBtn  = document.getElementById('pvResetBtn');
+  var $actions = document.getElementById('pvActions');
+  var $lockBtn   = document.getElementById('pvLockBtn');
+  var $dragHandle = document.getElementById('pvDragHandle');
   var $hint      = document.getElementById('pvHint');
   var $loader    = document.getElementById('pvLoader');
   var $loaderText = document.getElementById('pvLoaderText');
@@ -2931,8 +2980,8 @@ $searchId.addEventListener('keydown', function (e) {
     $loader.style.display = 'none';
     $sheet.style.opacity = '1';
     $saveBtn.disabled = false;
-    $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
-    $resetBtn.disabled = false;
+    $saveBtn.innerHTML = '&#10003;';
+    // $resetBtn.disabled = false;
 
     $orderName.textContent = pv.label;
     $pdfLabel.textContent  = 'PDF ' + (pv.pdf_index + 1) + '/' + pv.pdf_total +
@@ -3454,31 +3503,147 @@ applyZoom();  // applyZoom clamps to minimum
     }
     $sheet.appendChild(m);
   }
+// Lines 3946 - 3974[cite: 1]
+var PV_POS_KEY = 'pvActionsPos';
+var PV_LOCK_KEY = 'pvActionsLocked';
+var _pvLocked = true;
 
+function _pvClampToViewport(left, top) {
+  var w = $actions.offsetWidth || 220;
+  var h = $actions.offsetHeight || 46;
+  return {
+    left: Math.max(4, Math.min(window.innerWidth - w - 4, left)),
+    top: Math.max(4, Math.min(window.innerHeight - h - 4, top))
+  };
+}
+
+function _pvApplyFloatPos(left, top) {
+  var p = _pvClampToViewport(left, top);
+  $actions.style.left = p.left + 'px';
+  $actions.style.top = p.top + 'px';
+  try {
+    localStorage.setItem(PV_POS_KEY, JSON.stringify(p));
+  } catch (e) { /* storage unavailable - position is session-only */ }
+}
+
+function _pvSetLocked(locked, savePref) {
+  _pvLocked = locked;
+  if (locked) {
+    $actions.classList.remove('pv-floating');
+    $actions.style.left = '';
+    $actions.style.top = '';
+    $lockBtn.classList.remove('unlocked');
+// Lines 3975 - 4003[cite: 2]
+    $lockBtn.innerHTML = '&#128274;';
+    $lockBtn.title = 'Unlock to drag this bar';
+  } else {
+    // Freeze current on-screen box before switching to fixed positioning
+    var r = $actions.getBoundingClientRect();
+    $actions.classList.add('pv-floating');
+    _pvApplyFloatPos(r.left, r.top);
+    $lockBtn.classList.add('unlocked');
+    $lockBtn.innerHTML = '&#128275;';
+    $lockBtn.title = 'Lock position (snap back to header)';
+  }
+  if (savePref !== false) {
+    try { localStorage.setItem(PV_LOCK_KEY, locked ? '1' : '0'); } catch (e) {}
+  }
+}
+
+$lockBtn.addEventListener('click', function (e) {
+  e.stopPropagation();
+  _pvSetLocked(!_pvLocked);
+});
+
+(function _pvAttachBarDrag() {
+  var startX, startY, startLeft, startTop, dragging = false;
+
+  function onDown(e) {
+    if (_pvLocked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var pt = e.touches ? e.touches[0] : e;
+// Lines 4004 - 4031[cite: 3]
+    var r = $actions.getBoundingClientRect();
+    startX = pt.clientX; startY = pt.clientY;
+    startLeft = r.left;  startTop = r.top;
+    dragging = true;
+    $actions.classList.add('pv-dragging');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onUp);
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    var pt = e.touches ? e.touches[0] : e;
+    _pvApplyFloatPos(startLeft + (pt.clientX - startX),
+                     startTop + (pt.clientY - startY));
+  }
+
+  function onUp() {
+    dragging = false;
+    $actions.classList.remove('pv-dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+  }
+// Lines 4032 - 4059[cite: 4]
+  $dragHandle.addEventListener('mousedown', onDown);
+  $dragHandle.addEventListener('touchstart', onDown, { passive: false });
+})();
+
+// Restore saved lock state + position
+(function _pvRestoreBarState() {
+  var wasUnlocked = false;
+  try { wasUnlocked = localStorage.getItem(PV_LOCK_KEY) === '0'; } catch (e) {}
+  if (!wasUnlocked) return;
+  _pvLocked = false;
+  $actions.classList.add('pv-floating');
+  $lockBtn.classList.add('unlocked');
+  $lockBtn.innerHTML = '&#128275;';
+  $lockBtn.title = 'Lock position (snap back to header)';
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem(PV_POS_KEY) || 'null'); } catch (e) {}
+  if (saved && typeof saved.left === 'number') {
+    _pvApplyFloatPos(saved.left, saved.top);
+  } else {
+    _pvApplyFloatPos(window.innerWidth - 300, 12);
+  }
+})();
+
+window.addEventListener('resize', function () {
+  if (_pvLocked) return;
+  var r = $actions.getBoundingClientRect();
+  _pvApplyFloatPos(r.left, r.top);
+});
   // Reset all images to centre + fill mode
-  $resetBtn.addEventListener('click', function () {
-    _cells.forEach(function (cd) {
-      cd.mode = 'fill';
-      cd.toggleBtn.className = 'pv-toggle fill';
+  // $resetBtn.addEventListener('click', function () {
+  //   _cells.forEach(function (cd) {
+  //     cd.mode = 'fill';
+  //     cd.toggleBtn.className = 'pv-toggle fill';
       
-      cd.toggleBtn.textContent = 'Fill';
-      cd.displayW = cd.fillW;
-      cd.displayH = cd.fillH;
-      cd.imgEl.style.width = cd.fillW + 'px';
-      cd.imgEl.style.height = cd.fillH + 'px';
-      cd.offX = -Math.round((cd.fillW - cd.frameW) / 2);
-      cd.offY = -Math.round((cd.fillH - cd.frameH) / 2);
-      cd.imgEl.style.left = cd.offX + 'px';
-      cd.imgEl.style.top = cd.offY + 'px';
-      cd.el.style.cursor = 'grab';
-      // Reset rotation & zoom
-      cd.rotation = 0;
-      cd.zoom = 1.0;
-      cd.imgEl.style.transform = '';
-      if (cd.rotateBtn) cd.rotateBtn.classList.remove('rotated');
-      _syncClone(cd);
-    });
-  });
+  //     cd.toggleBtn.textContent = 'Fill';
+  //     cd.displayW = cd.fillW;
+  //     cd.displayH = cd.fillH;
+  //     cd.imgEl.style.width = cd.fillW + 'px';
+  //     cd.imgEl.style.height = cd.fillH + 'px';
+  //     cd.offX = -Math.round((cd.fillW - cd.frameW) / 2);
+  //     cd.offY = -Math.round((cd.fillH - cd.frameH) / 2);
+  //     cd.imgEl.style.left = cd.offX + 'px';
+  //     cd.imgEl.style.top = cd.offY + 'px';
+  //     cd.el.style.cursor = 'grab';
+  //     // Reset rotation & zoom
+  //     cd.rotation = 0;
+  //     cd.zoom = 1.0;
+  //     cd.imgEl.style.transform = '';
+  //     if (cd.rotateBtn) cd.rotateBtn.classList.remove('rotated');
+  //     _syncClone(cd);
+  //   });
+  // });
 
   // Save & Continue
   $saveBtn.addEventListener('click', function () {
@@ -3520,7 +3685,7 @@ x: Math.round(finalX * 1000) / 1000,
 
     $saveBtn.disabled = true;
     $saveBtn.textContent = 'Saving...';
-    $resetBtn.disabled = true;
+    // $resetBtn.disabled = true;
 
     // Show loader over the sheet (don't hide overlay)
     $sheet.style.opacity = '0.3';
@@ -3539,8 +3704,8 @@ x: Math.round(finalX * 1000) / 1000,
         $loader.style.display = 'none';
         $sheet.style.opacity = '1';
         $saveBtn.disabled = false;
-        $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
-        $resetBtn.disabled = false;
+        $saveBtn.innerHTML = '&#10003;';
+        // $resetBtn.disabled = false;
         return;
       }
       // Stay on overlay - loader shows until next preview arrives
@@ -3551,8 +3716,8 @@ x: Math.round(finalX * 1000) / 1000,
       $loader.style.display = 'none';
       $sheet.style.opacity = '1';
       $saveBtn.disabled = false;
-      $saveBtn.innerHTML = '&#10003; Save &amp; Continue';
-      $resetBtn.disabled = false;
+      $saveBtn.innerHTML = '&#10003;';
+      // $resetBtn.disabled = false;
     });
   });
 })();

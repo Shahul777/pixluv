@@ -10,7 +10,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, send_file, jsonify
 from werkzeug.utils import secure_filename
 
-from PIL import Image, ExifTags, ImageCms,ImageFile
+from PIL import Image, ExifTags, ImageCms,ImageFile, ImageOps,ImageEnhance, ImageFilter, ImageStat
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 from reportlab.lib.units import inch
 from reportlab.lib.colors import CMYKColor
@@ -301,6 +301,7 @@ def process_image(filepath: str, out_path: str, layout: dict,
  
     # ------------------------------
     #img = enhancer.enhance(1.08)
+    #img = _brighten_photo(img)
     img = convert_to_cmyk_properly(img)
     # img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
     img.save(out_path, "JPEG", quality=JPEG_QUALITY)
@@ -313,7 +314,46 @@ def _create_placeholder(out_path: str, layout: dict) -> None:
         img = Image.new("RGB", (fw, fh), (230, 230, 230))
     img = img.convert("CMYK")
     img.save(out_path, "JPEG", quality=JPEG_QUALITY)
+PHOTO_BRIGHTNEN_ENABLED       = True
+PHOTO_BRIGHTNESS_BOOST        = 1.08    # +8% overall brightness
+PHOTO_SATURATION_BOOST        = 1.12    # +12% saturation ("pop")
+PHOTO_CONTRAST_BOOST          = 1.06    # +6% contrast
+PHOTO_DARK_MEAN_THRESHOLD     = 120     # mean luminance (0-255) below which gamma-lift kicks in
+PHOTO_DARK_GAMMA              = 0.80    # <1 brightens midtones; smaller = stronger lift
 
+
+def _brighten_photo(img: Image.Image) -> Image.Image:
+    """Adaptive brightness / tone pass for print output."""
+    if not PHOTO_BRIGHTNEN_ENABLED or img.mode != "RGB":
+        return img
+    try:
+        try:
+            img = ImageOps.autocontrast(img, cutoff=(0.5, 0.0), preserve_tone=True)
+        except TypeError:
+            img = ImageOps.autocontrast(img, cutoff=1)
+        
+        try:
+            mean_lum = ImageStat.Stat(img.convert("L")).mean[0]
+        except Exception:
+            mean_lum = 128.0
+            
+        if mean_lum < PHOTO_DARK_MEAN_THRESHOLD:
+            darkness = (PHOTO_DARK_MEAN_THRESHOLD - mean_lum) / PHOTO_DARK_MEAN_THRESHOLD
+            gamma = 1.0 - (1.0 - PHOTO_DARK_GAMMA) * min(1.0, max(0.0, darkness))
+            inv = 1.0 / gamma
+            lut = [min(255, int(round(((i / 255.0) ** inv) * 255))) for i in range(256)]
+            img = img.point(lut * 3)
+
+        if PHOTO_BRIGHTNESS_BOOST != 1.0:
+            img = ImageEnhance.Brightness(img).enhance(PHOTO_BRIGHTNESS_BOOST)
+        if PHOTO_CONTRAST_BOOST != 1.0:
+            img = ImageEnhance.Contrast(img).enhance(PHOTO_CONTRAST_BOOST)
+        if PHOTO_SATURATION_BOOST != 1.0:
+            img = ImageEnhance.Color(img).enhance(PHOTO_SATURATION_BOOST)
+        return img
+    except Exception:
+        log.exception("Brightness pass failed; using original image")
+        return img
 def _draw_cut_marks(c: canvas.Canvas, layout: dict, layout_key:str = "") -> None:
     c.setStrokeColor(CUT_MARK_COLOR)
     c.setLineWidth(CUT_MARK_THICKNESS)
